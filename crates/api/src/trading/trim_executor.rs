@@ -361,15 +361,20 @@ impl TrimExecutor {
             .query_opt(
                 "SELECT value_usd, amount FROM portfolio_assets 
                  WHERE token_mint = $1 
-                 ORDER BY last_updated DESC LIMIT 1",
+                 ORDER BY updated_at DESC LIMIT 1",
                 &[&token_mint],
             )
             .await
             .map_err(|e| Error::Database(format!("Failed to query current price: {}", e)))?;
 
         if let Some(row) = row {
-            let value_usd: Option<f64> = row.get(0);
-            let amount: String = row.get(1);
+            // NUMERIC columns: read as Decimal then convert, mirroring the
+            // working pattern in analytics.rs. Reading value_usd as f64 or
+            // amount as String panics at runtime.
+            let value_usd: Option<f64> = row
+                .get::<_, Option<Decimal>>(0)
+                .and_then(|v| v.to_string().parse::<f64>().ok());
+            let amount: String = row.get::<_, Decimal>(1).to_string();
 
             if let (Some(value), Ok(amt)) = (value_usd, Decimal::from_str(&amount)) {
                 if amt > Decimal::ZERO {

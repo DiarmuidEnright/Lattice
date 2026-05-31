@@ -23,6 +23,7 @@ fn create_test_discovery_service(user_tag: &str, wallet: &str) -> DiscoveryServi
 fn create_test_peer(user_tag: &str, wallet: &str, method: DiscoveryMethod) -> DiscoveredPeer {
     DiscoveredPeer {
         peer_id: format!("peer_{}", user_tag),
+        user_id: uuid::Uuid::nil(),
         user_tag: user_tag.to_string(),
         wallet_address: wallet.to_string(),
         discovery_method: method,

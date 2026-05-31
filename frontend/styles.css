@@ -693,6 +693,7 @@ body::after {
    ============================================================ */
 .hidden { display: none !important; }
 .empty-state { text-align: center; color: var(--text-disabled); padding: var(--space-xl); font-size: 0.9rem; font-style: italic; }
+.error-state { text-align: center; color: var(--text-primary); padding: var(--space-xl); font-size: 0.9rem; border: 1px solid var(--border-medium); border-left: 3px solid var(--text-secondary); border-radius: 4px; background: var(--surface-2); }
 .error-message { color: var(--text-secondary); font-size: 0.8rem; margin-top: 0.4rem; font-family: var(--font-mono); }
 
 /* ============================================================

@@ -61,6 +61,7 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/api/analytics/portfolio-performance", post(handlers::get_portfolio_performance))
         .route("/api/analytics/whale-impact", post(handlers::get_whale_impact))
         .route("/api/analytics/recommendation-accuracy", post(handlers::get_recommendation_accuracy))
+        .route("/api/analytics/:user_id/ai-actions", get(handlers::get_ai_actions))
         .route("/api/dashboard/:user_id", get(handlers::get_dashboard_data))
         
         // Benchmarks
@@ -133,6 +134,7 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/api/privacy/:user_id/temporary-wallets", get(handlers::get_temporary_wallets))
         .route("/api/privacy/:user_id/temporary-wallets", post(handlers::create_temporary_wallet))
         .route("/api/privacy/:user_id/temporary-wallets/:wallet_id/primary", put(handlers::set_primary_temporary_wallet))
+        .route("/api/privacy/:user_id/wallets", get(handlers::get_user_wallets_freeze_status))
         .route("/api/privacy/:user_id/wallets/:wallet_address/freeze", post(handlers::freeze_wallet))
         .route("/api/privacy/:user_id/wallets/:wallet_address/unfreeze", post(handlers::unfreeze_wallet))
         .route("/api/privacy/wallets/:wallet_address/frozen", get(handlers::check_wallet_frozen))
@@ -145,6 +147,7 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         
         // Proximity P2P Transfers - Transfers
         .route("/api/proximity/transfers", post(proximity_handlers::create_transfer))
+        .route("/api/proximity/transfers/sync", post(proximity_handlers::sync_pending_transfers))
         .route("/api/proximity/transfers/:id/accept", post(proximity_handlers::accept_transfer))
         .route("/api/proximity/transfers/:id/reject", post(proximity_handlers::reject_transfer))
         .route("/api/proximity/transfers/:id", get(proximity_handlers::get_transfer_status))
@@ -158,6 +161,7 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/api/stealth/shield", post(handlers::shield_funds))
         .route("/api/stealth/unshield", post(handlers::unshield_funds))
         .route("/api/stealth/queue", get(handlers::get_payment_queue))
+        .route("/api/stealth/qr-encode", post(handlers::qr_encode_stealth))
         
         // BLE Mesh Network
         .route("/api/mesh/status", get(handlers::get_ble_mesh_status))

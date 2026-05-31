@@ -689,7 +689,10 @@ impl AnalyticsService {
             .map_err(|e| Error::Database(format!("Failed to insert portfolio snapshot: {}", e)))?;
 
         let snapshot_id: Uuid = snapshot_row.get(0);
-        let snapshot_time: DateTime<Utc> = snapshot_row.get(1);
+        // snapshot_time is `timestamp without time zone`; read as NaiveDateTime
+        // (reading into DateTime<Utc> panics) and convert to UTC.
+        let snapshot_time: DateTime<Utc> =
+            snapshot_row.get::<_, chrono::NaiveDateTime>(1).and_utc();
 
         // Insert asset snapshots
         for row in asset_rows {
@@ -754,7 +757,11 @@ impl AnalyticsService {
 
         let wallet_id: Uuid = wallet_row.get(0);
 
-        // Get all snapshots in the time range
+        // Get all snapshots in the time range. snapshot_time is `timestamp
+        // without time zone`, so bind the bounds as NaiveDateTime (binding
+        // DateTime<Utc> fails with a parameter serialization error).
+        let start_naive = start_date.naive_utc();
+        let end_naive = end_date.naive_utc();
         let snapshot_rows = client
             .query(
                 "SELECT id, total_value_usd, snapshot_time 
@@ -763,7 +770,7 @@ impl AnalyticsService {
                    AND snapshot_time >= $2 
                    AND snapshot_time <= $3
                  ORDER BY snapshot_time ASC",
-                &[&wallet_id, &start_date, &end_date],
+                &[&wallet_id, &start_naive, &end_naive],
             )
             .await
             .map_err(|e| Error::Database(format!("Failed to query snapshots: {}", e)))?;
@@ -778,7 +785,9 @@ impl AnalyticsService {
         let mut snapshots = Vec::new();
         for row in &snapshot_rows {
             let total_value: rust_decimal::Decimal = row.get(1);
-            let timestamp: DateTime<Utc> = row.get(2);
+            // snapshot_time is `timestamp without time zone`; read as
+            // NaiveDateTime then convert (reading into DateTime<Utc> panics).
+            let timestamp: DateTime<Utc> = row.get::<_, chrono::NaiveDateTime>(2).and_utc();
 
             snapshots.push(PortfolioSnapshot {
                 timestamp,
@@ -962,7 +971,8 @@ impl AnalyticsService {
 
         Ok(row.map(|r| {
             let total_value: rust_decimal::Decimal = r.get(0);
-            let timestamp: DateTime<Utc> = r.get(1);
+            // snapshot_time is `timestamp without time zone`.
+            let timestamp: DateTime<Utc> = r.get::<_, chrono::NaiveDateTime>(1).and_utc();
 
             PortfolioSnapshot {
                 timestamp,
@@ -1110,7 +1120,11 @@ impl AnalyticsService {
             Error::Database(format!("Failed to get database connection: {}", e))
         })?;
 
-        // Get snapshot before the event (within 1 hour before)
+        // Get snapshot before the event (within 1 hour before). snapshot_time
+        // is `timestamp without time zone`, so bind NaiveDateTime bounds.
+        let ts_naive = timestamp.naive_utc();
+        let before_naive = (timestamp - chrono::Duration::hours(1)).naive_utc();
+        let after_naive = (timestamp + chrono::Duration::hours(1)).naive_utc();
         let before_row = client
             .query_opt(
                 "SELECT total_value_usd 
@@ -1120,7 +1134,7 @@ impl AnalyticsService {
                    AND snapshot_time >= $3
                  ORDER BY snapshot_time DESC 
                  LIMIT 1",
-                &[&wallet_id, &timestamp, &(timestamp - chrono::Duration::hours(1))],
+                &[&wallet_id, &ts_naive, &before_naive],
             )
             .await
             .map_err(|e| Error::Database(format!("Failed to query before snapshot: {}", e)))?;
@@ -1135,7 +1149,7 @@ impl AnalyticsService {
                    AND snapshot_time <= $3
                  ORDER BY snapshot_time ASC 
                  LIMIT 1",
-                &[&wallet_id, &timestamp, &(timestamp + chrono::Duration::hours(1))],
+                &[&wallet_id, &ts_naive, &after_naive],
             )
             .await
             .map_err(|e| Error::Database(format!("Failed to query after snapshot: {}", e)))?;

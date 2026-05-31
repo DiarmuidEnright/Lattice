@@ -1,5 +1,10 @@
 // Proximity Transfer Functions
 
+// Default sender wallet for proximity transfers when no wallet is connected on
+// the dashboard. This is the demo user's funded Solana wallet (the on-chain
+// sender). Transfers settle from the backend's custodial demo signer.
+const DEMO_SENDER_WALLET = 'EYsJVQU5igQNaNMptsyL2A6h6QWso34MYxTriAkdQqWj';
+
 // State for proximity features
 const proximityState = {
     discoveryActive: false,
@@ -259,21 +264,30 @@ async function refreshPeers() {
     if (!proximityState.discoveryActive) return;
     
     try {
-        const response = await fetch(`${API_BASE_URL}/api/proximity/peers`);
-        
-        if (!response.ok) {
-            throw new Error('Failed to load peers');
-        }
-        
-        const data = await response.json();
+        // Route through apiFetch for the uniform 10s timeout + error path (Req 2.8).
+        const data = await apiFetch('/api/proximity/peers');
         proximityState.discoveredPeers = data.peers || [];
         
         displayDiscoveredPeers(proximityState.discoveredPeers);
         
     } catch (error) {
         console.error('Error loading peers:', error);
-        // Display mock peers for demo
-        displayMockPeers();
+        // Mock peers are only sanctioned when the backend was unreachable at
+        // open (Req 2.5), always paired with the persistent "data not live"
+        // banner. While the backend is reachable, a failed request surfaces a
+        // visible error and never silently substitutes mock data (Req 2.3/2.4/2.7).
+        if (typeof state !== 'undefined' && state.backendReachable === false) {
+            if (typeof showDataNotLiveBanner === 'function') showDataNotLiveBanner();
+            displayMockPeers();
+        } else {
+            const container = document.getElementById('discoveredPeersList');
+            if (container) {
+                container.innerHTML = `<p class="error-state">⚠ Failed to load nearby peers: ${error.message}</p>`;
+            }
+            if (typeof showError === 'function') {
+                showError(`Failed to load nearby peers: ${error.message}`);
+            }
+        }
     }
 }
 
@@ -395,15 +409,40 @@ function updateTransferFees() {
         return;
     }
     
-    // Mock fee calculation
+    // Network fee estimate (Solana base fee for SOL, slightly higher for SPL tokens)
     const networkFee = asset === 'SOL' ? 0.000005 : 0.00001;
     const total = amount + networkFee;
     
     document.getElementById('networkFeeEstimate').textContent = `${networkFee} ${asset}`;
     document.getElementById('totalToSend').textContent = `${total.toFixed(6)} ${asset}`;
-    document.getElementById('transferBalance').textContent = `Available: -- ${asset}`;
+    
+    // Show the real available balance of the sender wallet for the selected asset.
+    updateTransferBalance(asset);
     
     document.getElementById('confirmTransferBtn').disabled = false;
+}
+
+// Fetch and display the sender wallet's real available balance for the asset.
+async function updateTransferBalance(asset) {
+    const balanceEl = document.getElementById('transferBalance');
+    if (!balanceEl) return;
+    const senderWallet = state.connectedWallet || DEMO_SENDER_WALLET;
+    balanceEl.textContent = `Available: … ${asset}`;
+    try {
+        const resp = await fetch(`${API_BASE_URL}/api/wallets/${senderWallet}/portfolio`);
+        if (!resp.ok) throw new Error('balance unavailable');
+        const json = await resp.json();
+        const assets = (json.data && json.data.assets) || [];
+        const match = assets.find(a => a.token_symbol === asset);
+        if (match) {
+            const amt = parseFloat(match.amount);
+            balanceEl.textContent = `Available: ${amt.toLocaleString(undefined, { maximumFractionDigits: 6 })} ${asset}`;
+        } else {
+            balanceEl.textContent = `Available: 0 ${asset}`;
+        }
+    } catch (e) {
+        balanceEl.textContent = `Available: -- ${asset}`;
+    }
 }
 
 async function confirmTransfer() {
@@ -429,13 +468,21 @@ async function confirmTransfer() {
     errorDiv.textContent = '';
     
     try {
+        // The on-chain sender is the backend's funded demo wallet. Use the
+        // connected wallet if the user linked one, otherwise fall back to the
+        // demo sender wallet so a proximity transfer works without first
+        // connecting a wallet on the dashboard.
+        const senderWallet = state.connectedWallet || DEMO_SENDER_WALLET;
         const response = await fetch(`${API_BASE_URL}/api/proximity/transfers`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 sender_user_id: DEMO_USER_ID,
-                sender_wallet: state.connectedWallet,
-                recipient_user_id: proximityState.selectedPeer.peer_id,
+                sender_wallet: senderWallet,
+                // Use the peer's real user account id (UUID) broadcast via
+                // discovery, not the device-level peer_id, so the backend can
+                // persist the transfer against a valid users(id).
+                recipient_user_id: proximityState.selectedPeer.user_id || proximityState.selectedPeer.peer_id,
                 recipient_wallet: proximityState.selectedPeer.wallet_address,
                 asset: asset,
                 amount: amount.toString()
@@ -443,8 +490,8 @@ async function confirmTransfer() {
         });
         
         if (!response.ok) {
-            const error = await response.json();
-            throw new Error(error.error || 'Failed to create transfer');
+            const error = await response.json().catch(() => ({}));
+            throw new Error(error.message || error.error || 'Failed to create transfer');
         }
         
         showToast('Transfer request sent!', 'success');
@@ -453,8 +500,9 @@ async function confirmTransfer() {
         
     } catch (error) {
         console.error('Error creating transfer:', error);
-        errorDiv.textContent = error.message || 'Failed to create transfer';
-        showToast('Failed to send transfer request', 'error');
+        const msg = error.message || 'Failed to create transfer';
+        errorDiv.textContent = msg;
+        showToast(msg, 'error');
     } finally {
         hideLoading();
     }
@@ -534,17 +582,26 @@ async function acceptTransfer() {
             { method: 'POST' }
         );
         
+        const data = await response.json().catch(() => ({}));
         if (!response.ok) {
-            throw new Error('Failed to accept transfer');
+            throw new Error(data.message || data.error || 'Failed to accept transfer');
         }
         
-        showToast('Transfer accepted! Processing...', 'success');
+        // The backend either settled the transfer on-chain immediately
+        // (transaction_hash present) or, if the blockchain was unreachable,
+        // queued it for automatic settlement when connectivity returns.
+        if (data.transaction_hash) {
+            const sig = data.transaction_hash;
+            showToast(`Transfer settled on-chain! Tx: ${sig.substring(0, 8)}...`, 'success');
+        } else {
+            showToast('Offline: transfer queued — it will sync to the blockchain when back online', 'warning');
+        }
         hideIncomingTransferNotification();
         loadProximityHistory();
         
     } catch (error) {
         console.error('Error accepting transfer:', error);
-        showToast('Failed to accept transfer', 'error');
+        showToast(`Failed to accept transfer: ${error.message}`, 'error');
     } finally {
         hideLoading();
     }
@@ -599,13 +656,8 @@ async function loadProximityHistory() {
             offset: '0'
         });
         
-        const response = await fetch(`${API_BASE_URL}/api/proximity/transfers/history?${params}`);
-        
-        if (!response.ok) {
-            throw new Error('Failed to load history');
-        }
-        
-        const data = await response.json();
+        // Route through apiFetch for the uniform 10s timeout + error path (Req 2.8).
+        const data = await apiFetch(`/api/proximity/transfers/history?${params}`);
         let transfers = data.transfers || [];
         
         // Apply filters
@@ -615,7 +667,22 @@ async function loadProximityHistory() {
         
     } catch (error) {
         console.error('Error loading history:', error);
-        displayMockProximityHistory();
+        // Mock history is only sanctioned when the backend was unreachable at
+        // open (Req 2.5), always paired with the "data not live" banner. While
+        // reachable, a failed request surfaces a visible error and never
+        // silently substitutes mock data (Req 2.3/2.4/2.7).
+        if (typeof state !== 'undefined' && state.backendReachable === false) {
+            if (typeof showDataNotLiveBanner === 'function') showDataNotLiveBanner();
+            displayMockProximityHistory();
+        } else {
+            const container = document.getElementById('proximityHistoryList');
+            if (container) {
+                container.innerHTML = `<p class="error-state">⚠ Failed to load transfer history: ${error.message}</p>`;
+            }
+            if (typeof showError === 'function') {
+                showError(`Failed to load transfer history: ${error.message}`);
+            }
+        }
     }
 }
 
@@ -692,6 +759,9 @@ function displayProximityHistory(transfers) {
                 <div class="transfer-amount-value">${parseFloat(transfer.amount).toFixed(6)}</div>
                 <div class="transfer-asset">${transfer.asset}</div>
                 <span class="transfer-status-badge ${statusClass}">${transfer.status}</span>
+                ${transfer.status === 'PendingSettlement' ?
+                    `<span class="transfer-sync-hint" title="Recorded offline; will settle on-chain when connectivity returns">⏳ Will sync when online</span>` :
+                    ''}
                 ${transfer.status === 'Completed' ? 
                     `<button class="receipt-download-btn" onclick="downloadReceipt('${transfer.id}')">
                         Download Receipt

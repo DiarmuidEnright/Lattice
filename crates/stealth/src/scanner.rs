@@ -3,7 +3,6 @@
 use crate::crypto::StealthCrypto;
 use crate::error::{StealthError, StealthResult};
 use crate::keypair::StealthKeyPair;
-use curve25519_dalek::edwards::CompressedEdwardsY;
 use curve25519_dalek::scalar::Scalar;
 use ed25519_dalek::{Keypair, PublicKey, SecretKey};
 use solana_client::rpc_client::RpcClient;
@@ -11,7 +10,7 @@ use solana_sdk::commitment_config::CommitmentConfig;
 use solana_sdk::pubkey::Pubkey;
 use solana_sdk::signature::Signature;
 use std::sync::Arc;
-use tracing::{debug, info};
+use tracing::info;
 
 /// Scanner for detecting incoming stealth payments
 /// 
@@ -22,6 +21,10 @@ use tracing::{debug, info};
 /// Validates: Requirements 3.1, 3.2, 3.3, 3.4, 3.5, 3.6
 pub struct StealthScanner {
     viewing_keypair: Keypair,
+    // justification: read by verify_ownership (receiver-side capability exercised
+    // by unit tests); the lib build sees it as unread because the only reader is
+    // itself dead_code-allowed pending wiring into scan_for_payments.
+    #[allow(dead_code)]
     spending_public_key: Pubkey,
     scan_index: u64,
     rpc_client: Arc<RpcClient>,
@@ -134,47 +137,6 @@ impl StealthScanner {
         Ok(detected_payments)
     }
 
-    /// Check if a transaction contains a stealth payment for this wallet
-    /// 
-    /// This method implements the viewing tag filtering optimization:
-    /// 1. Extract potential ephemeral public keys from transaction
-    /// 2. Compute viewing tag using ECDH with viewing key
-    /// 3. Only perform full verification if viewing tag matches
-    /// 
-    /// # Requirements
-    /// Validates: Requirements 3.2, 3.3, 3.4
-    fn check_transaction(
-        &self,
-        tx: &solana_sdk::transaction::Transaction,
-        signature: Signature,
-        slot: u64,
-    ) -> Option<DetectedPayment> {
-        // For now, we'll implement a simplified version that looks for stealth payment metadata
-        // In a full implementation, this would:
-        // 1. Parse transaction instructions for stealth payment metadata
-        // 2. Extract ephemeral public key and viewing tag
-        // 3. Verify viewing tag matches before doing full ECDH
-        // 4. Compute shared secret and verify ownership
-        
-        // This is a placeholder implementation that demonstrates the structure
-        // A real implementation would need to parse the transaction data format
-        
-        // Extract account keys from transaction
-        let account_keys = &tx.message.account_keys;
-        
-        // Look for potential stealth addresses and ephemeral keys in the transaction
-        // This would be based on the specific transaction format used for stealth payments
-        
-        // For demonstration, we'll return None (no payment detected)
-        // In a real implementation, this would:
-        // - Parse instruction data for StealthPaymentMetadata
-        // - Extract ephemeral_public_key and viewing_tag
-        // - Call check_viewing_tag() to filter
-        // - Call verify_ownership() to confirm
-        
-        None
-    }
-
     /// Check if a viewing tag matches our expected tag
     /// 
     /// This is the optimization that allows us to skip expensive ECDH computations
@@ -182,6 +144,10 @@ impl StealthScanner {
     /// 
     /// # Requirements
     /// Validates: Requirements 3.2
+    // justification: receiver-side scanning capability exercised by unit tests
+    // (test_check_viewing_tag_match/mismatch); not yet wired into the placeholder
+    // scan_for_payments path, so the lib build sees it as unused.
+    #[allow(dead_code)]
     fn check_viewing_tag(
         &self,
         ephemeral_public_key: &Pubkey,
@@ -208,6 +174,10 @@ impl StealthScanner {
     /// 
     /// # Requirements
     /// Validates: Requirements 3.3, 3.4
+    // justification: receiver-side ownership verification exercised by unit tests
+    // (test_verify_ownership_wrong_address); not yet wired into the placeholder
+    // scan_for_payments path, so the lib build sees it as unused.
+    #[allow(dead_code)]
     fn verify_ownership(
         &self,
         ephemeral_public_key: &Pubkey,

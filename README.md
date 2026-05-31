@@ -11,13 +11,12 @@ A next-generation crypto trading platform that combines real-time account tracki
 - **Wallet Connection**: Connect multiple wallets across different blockchains
 - **Real-time Portfolio**: Aggregated portfolio view with live prices
 - **Advanced Analytics**: Metrics, profit/loss tracking, and extensive position information
-- **In-App Conversions**: Swap between any supported assets via SideShift and Jupiter
+- **In-App Conversions**: Swap between any supported assets via SideShift
 - **Price Benchmarks**: Set automated buy/sell triggers at target prices
 
 ### AI-Powered Features
 - **Agentic Trimming**: Automated profit-taking based on AI recommendations
 - **Local AI Models**: Privacy-focused on-device AI with Llama 2 or Mistral
-- **Voice Trading**: Execute trades and queries via Intercom voice commands
 
 ### Movement Tracking
 - **Whale Detection**: Automatically identify and track large holders in the closed network
@@ -29,9 +28,14 @@ A next-generation crypto trading platform that combines real-time account tracki
 - **Wallet Freezing**: Emergency freeze capability for security
 - **Anonymous Tags**: Privacy-preserving user identifiers
 - **Temporary Wallets**: Create short-lived wallets for specific activities
-- **Verification System**: KYC and wallet ownership verification
+- **Verification System**: Wallet ownership verification
 
-### Blockchain Features
+### Proximity & Offline Transfers
+- **Proximity-Based Transfers**: Discover nearby users via BLE and mDNS, authenticate with cryptographic challenges, and transfer with real-time status over WebSocket, including session management and receipt generation
+- **BLE Mesh Network for Offline P2P**: Bluetooth Low Energy mesh networking with store-and-forward routing for peer-to-peer transfers without internet connectivity — ideal for conferences, remote areas, or network outages
+
+### Stealth & Blockchain Features
+- **Stealth Addresses for Privacy**: One-time payment addresses with ECDH-based key derivation (Curve25519), viewing tags for efficient scanning, and hybrid post-quantum cryptography (Kyber)
 - **Blockchain Receipts**: Immutable proof of all transactions
 - **On-Chain Chat**: Verified peer-to-peer messaging for during transactions and also to all users in range
 - **End-to-End Encryption**: Secure message encryption
@@ -49,37 +53,111 @@ A next-generation crypto trading platform that combines real-time account tracki
 
 
 
+## Getting Started
+
+### Prerequisites
+
+- Rust 1.75+ with Cargo
+- PostgreSQL 14+ and Redis 7+ (a `docker-compose.yml` is provided to run both locally)
+- Python 3 (used to serve the static frontend)
+
+### 1. Configure environment
+
+Copy the example environment file and fill in real values:
+
+```bash
+cp .env.example .env
+```
+
+Edit `.env` and provide your own credentials. The backend loads configuration
+exclusively from the environment and **fails fast on startup**, naming every
+missing required credential, if any are absent. At minimum you must set
+`DATABASE_URL`, `REDIS_URL`, the Solana RPC settings (`SOLANA_RPC_URL`,
+`SOLANA_RPC_FALLBACK_URL`, `SOLANA_NETWORK`), the Claude settings
+(`CLAUDE_API_KEY`, `CLAUDE_MODEL`), the Stripe settings (`STRIPE_SECRET_KEY`,
+`STRIPE_WEBHOOK_SECRET`, `STRIPE_BASIC_PRICE_ID`, `STRIPE_PREMIUM_PRICE_ID`), and
+`JWT_SECRET`. The committed `.env.example` contains only non-functional
+placeholder values.
+
+### 2. Start dependencies
+
+```bash
+docker-compose up -d postgres redis
+```
+
+### 3. Build
+
+```bash
+cargo build --workspace
+```
+
+For an optimized binary used to run the backend:
+
+```bash
+cargo build --workspace --release
+```
+
+### 4. Run the backend
+
+After a release build, start the API server (listens on port 3000):
+
+```bash
+./target/release/api
+```
+
+The backend requires the `.env` configuration plus PostgreSQL and Redis to be
+reachable. If port 3000 is already in use, it reports a distinct
+port-unavailable condition.
+
+### 5. Serve the frontend
+
+From the `frontend/` directory:
+
+```bash
+cd frontend
+python3 -m http.server 8080
+```
+
+Then open `http://localhost:8080` in your browser. The frontend talks to the
+backend at `http://localhost:3000` by default.
+
+### 6. Run the tests
+
 ```bash
 cargo test --workspace
-
-cargo test --package api
-cargo test --package blockchain
-
-RUST_LOG=debug cargo test
 ```
 
 ### Project Structure
 
 ```
-solana-whale-tracker/
+lattice/
 ├── crates/
-│   ├── api/              # REST API and handlers
-│   ├── blockchain/       # Solana integration
-│   ├── database/         # Database layer
-│   ├── monitoring/       # Whale monitoring engine
-│   ├── ai-service/       # Claude API integration
-│   ├── notification/     # Notification service
-│   ├── trading/          # Trading and auto-trader
-│   ├── payment/          # Stripe integration
-│   └── shared/           # Shared types and utilities
-├── frontend/             # Web UI
+│   ├── api/              # REST API server, HTTP handlers, and WebSocket endpoints (Axum)
+│   ├── blockchain/       # Multi-chain integration (Solana + EVM: Ethereum, BSC, Polygon)
+│   ├── database/         # PostgreSQL/Redis layer, models, and migrations
+│   ├── monitoring/       # Account/whale activity monitoring engine
+│   ├── ai-service/       # Claude API integration and AI analysis consumer
+│   ├── notification/     # Multi-channel notification delivery
+│   ├── trading/          # Automated trading service
+│   ├── payment/          # Stripe payment processing
+│   ├── shared/           # Shared types, configuration, and utilities
+│   ├── proximity/        # Proximity-based discovery and transfers (BLE + mDNS)
+│   ├── stealth/          # Stealth addresses and privacy-preserving payments
+│   └── ble-mesh/         # Offline BLE mesh networking and packet routing
+├── frontend/             # Vanilla JS web UI
 │   ├── index.html
 │   ├── styles.css
-│   └── app.js
+│   ├── app.js
+│   ├── proximity.js
+│   └── stealth.js
 ├── Dockerfile
 ├── docker-compose.yml
-└── DEPLOYMENT.md
+└── README.md
 ```
+
+The `api` crate's source is organized into logical submodules — `mesh/`,
+`p2p/`, `proximity/`, `trading/`, `market_data/`, and `infra/` — under
+`crates/api/src/`.
 
 ## License
 
@@ -226,7 +304,7 @@ This is a Rust workspace project with 12 specialized crates:
 **P2P & Social:**
 - `p2p_service.rs` - Peer-to-peer exchange offers and matching
 - `chat_service.rs` - On-chain verified messaging
-- `verification_service.rs` - KYC and wallet verification
+- `verification_service.rs` - Wallet ownership verification
 - `privacy_service.rs` - Temporary wallets and privacy features
 
 **Receipts & Compliance:**
@@ -290,7 +368,7 @@ This is a Rust workspace project with 12 specialized crates:
 - `p2p_offers` - Active P2P exchange offers
 - `p2p_exchanges` - Completed exchanges
 - `chat_messages` - On-chain verified messages
-- `verifications` - KYC verification records
+- `identity_verifications` - Identity verification records
 - `wallet_verifications` - Wallet ownership proofs
 - `temporary_wallets` - Time-limited wallet addresses
 
@@ -320,9 +398,9 @@ This is a Rust workspace project with 12 specialized crates:
 - **Birdeye API** - Multi-chain price data and portfolio tracking
 - **SideShift API** - Cryptocurrency conversions and staking
 - **Claude API** - AI-powered whale movement analysis
-- **Intercom API** - Voice command processing
 - **Stripe API** - Payment processing and subscriptions
-- **KYC Provider API** - Identity verification
+- **Helius API** - Enhanced Solana RPC for wallet analytics (`tantum_client.rs`)
+- **CoinMarketCap API** - Real-time cryptocurrency price data
 
 **Infrastructure:**
 - **PostgreSQL 14+** - Primary data store
@@ -419,7 +497,6 @@ This is a Rust workspace project with 12 specialized crates:
 ### Feature Flags
 
 **Configurable Features:**
-- `ENABLE_VOICE_TRADING` - Voice command support
 - `ENABLE_P2P_EXCHANGE` - P2P trading features
 - `ENABLE_AGENTIC_TRIMMING` - AI-powered profit-taking
 - `USE_LOCAL_MODEL` - Local AI models vs. Claude API

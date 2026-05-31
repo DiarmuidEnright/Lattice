@@ -1,19 +1,50 @@
 use api::{TrimConfigService, UpdateTrimConfigRequest};
 use database::{create_pool, run_migrations};
 use rust_decimal::Decimal;
+use std::time::Duration;
 use uuid::Uuid;
 
-/// Helper to create a test database pool
-async fn setup_test_db() -> database::DbPool {
+/// Helper to create a test database pool, probing PostgreSQL with a short
+/// connect timeout.
+///
+/// Returns `Err` (with a human-readable reason) when the dependency is
+/// unreachable so callers can skip-with-named-reason rather than fail
+/// (Requirement 6.5: skipped distinct from failed for unreachable dependencies).
+async fn setup_test_db() -> Result<database::DbPool, String> {
     let database_url = std::env::var("DATABASE_URL")
         .unwrap_or_else(|_| "postgresql://postgres:password@localhost:5432/whale_tracker_test".to_string());
-    
-    let pool = create_pool(&database_url, 5).await.expect("Failed to create pool");
-    
+
+    let pool = create_pool(&database_url, 5)
+        .await
+        .map_err(|e| format!("failed to create pool: {}", e))?;
+
+    // Probe the dependency: a deadpool `get()` establishes a real connection,
+    // surfacing auth/connectivity errors (e.g. role missing). Bound it with a
+    // short timeout so an unreachable host does not hang the suite.
+    match tokio::time::timeout(Duration::from_secs(3), pool.get()).await {
+        Ok(Ok(_client)) => {}
+        Ok(Err(e)) => return Err(format!("connection failed: {}", e)),
+        Err(_) => return Err("connection timed out after 3s".to_string()),
+    }
+
     // Try to run migrations, but ignore if tables already exist
     let _ = run_migrations(&pool).await;
-    
-    pool
+
+    Ok(pool)
+}
+
+/// Acquire a pool or skip the current test with a named reason when PostgreSQL
+/// is unreachable. Expands to an early `return` on the skip path.
+macro_rules! pool_or_skip {
+    () => {
+        match setup_test_db().await {
+            Ok(pool) => pool,
+            Err(reason) => {
+                eprintln!("SKIPPED: PostgreSQL unavailable — {}", reason);
+                return;
+            }
+        }
+    };
 }
 
 /// Helper to create a test user
@@ -38,7 +69,7 @@ async fn create_test_user(pool: &database::DbPool) -> Uuid {
 
 #[tokio::test]
 async fn test_get_trim_config_returns_defaults_for_new_user() {
-    let pool = setup_test_db().await;
+    let pool = pool_or_skip!();
     let service = TrimConfigService::new(pool.clone());
     let user_id = create_test_user(&pool).await;
 
@@ -56,7 +87,7 @@ async fn test_get_trim_config_returns_defaults_for_new_user() {
 
 #[tokio::test]
 async fn test_upsert_trim_config_creates_new_config() {
-    let pool = setup_test_db().await;
+    let pool = pool_or_skip!();
     let service = TrimConfigService::new(pool.clone());
     let user_id = create_test_user(&pool).await;
 
@@ -81,7 +112,7 @@ async fn test_upsert_trim_config_creates_new_config() {
 
 #[tokio::test]
 async fn test_upsert_trim_config_updates_existing_config() {
-    let pool = setup_test_db().await;
+    let pool = pool_or_skip!();
     let service = TrimConfigService::new(pool.clone());
     let user_id = create_test_user(&pool).await;
 
@@ -117,7 +148,7 @@ async fn test_upsert_trim_config_updates_existing_config() {
 
 #[tokio::test]
 async fn test_upsert_rejects_non_positive_profit_percent() {
-    let pool = setup_test_db().await;
+    let pool = pool_or_skip!();
     let service = TrimConfigService::new(pool.clone());
     let user_id = create_test_user(&pool).await;
 
@@ -138,7 +169,7 @@ async fn test_upsert_rejects_non_positive_profit_percent() {
 
 #[tokio::test]
 async fn test_upsert_rejects_profit_percent_over_1000() {
-    let pool = setup_test_db().await;
+    let pool = pool_or_skip!();
     let service = TrimConfigService::new(pool.clone());
     let user_id = create_test_user(&pool).await;
 
@@ -159,7 +190,7 @@ async fn test_upsert_rejects_profit_percent_over_1000() {
 
 #[tokio::test]
 async fn test_upsert_rejects_non_positive_trim_percent() {
-    let pool = setup_test_db().await;
+    let pool = pool_or_skip!();
     let service = TrimConfigService::new(pool.clone());
     let user_id = create_test_user(&pool).await;
 
@@ -180,7 +211,7 @@ async fn test_upsert_rejects_non_positive_trim_percent() {
 
 #[tokio::test]
 async fn test_upsert_rejects_trim_percent_over_100() {
-    let pool = setup_test_db().await;
+    let pool = pool_or_skip!();
     let service = TrimConfigService::new(pool.clone());
     let user_id = create_test_user(&pool).await;
 
@@ -201,7 +232,7 @@ async fn test_upsert_rejects_trim_percent_over_100() {
 
 #[tokio::test]
 async fn test_upsert_rejects_non_positive_max_trims() {
-    let pool = setup_test_db().await;
+    let pool = pool_or_skip!();
     let service = TrimConfigService::new(pool.clone());
     let user_id = create_test_user(&pool).await;
 
@@ -222,7 +253,7 @@ async fn test_upsert_rejects_non_positive_max_trims() {
 
 #[tokio::test]
 async fn test_upsert_rejects_max_trims_over_100() {
-    let pool = setup_test_db().await;
+    let pool = pool_or_skip!();
     let service = TrimConfigService::new(pool.clone());
     let user_id = create_test_user(&pool).await;
 
@@ -243,7 +274,7 @@ async fn test_upsert_rejects_max_trims_over_100() {
 
 #[tokio::test]
 async fn test_set_enabled_updates_only_enabled_flag() {
-    let pool = setup_test_db().await;
+    let pool = pool_or_skip!();
     let service = TrimConfigService::new(pool.clone());
     let user_id = create_test_user(&pool).await;
 
@@ -273,7 +304,7 @@ async fn test_set_enabled_updates_only_enabled_flag() {
 
 #[tokio::test]
 async fn test_delete_trim_config() {
-    let pool = setup_test_db().await;
+    let pool = pool_or_skip!();
     let service = TrimConfigService::new(pool.clone());
     let user_id = create_test_user(&pool).await;
 
@@ -306,7 +337,7 @@ async fn test_delete_trim_config() {
 
 #[tokio::test]
 async fn test_delete_nonexistent_config_succeeds() {
-    let pool = setup_test_db().await;
+    let pool = pool_or_skip!();
     let service = TrimConfigService::new(pool.clone());
     let user_id = create_test_user(&pool).await;
 
@@ -317,7 +348,7 @@ async fn test_delete_nonexistent_config_succeeds() {
 
 #[tokio::test]
 async fn test_get_enabled_users() {
-    let pool = setup_test_db().await;
+    let pool = pool_or_skip!();
     let service = TrimConfigService::new(pool.clone());
 
     let user1 = create_test_user(&pool).await;
@@ -350,7 +381,7 @@ async fn test_get_enabled_users() {
 
 #[tokio::test]
 async fn test_has_reached_daily_limit_no_trims() {
-    let pool = setup_test_db().await;
+    let pool = pool_or_skip!();
     let service = TrimConfigService::new(pool.clone());
     let user_id = create_test_user(&pool).await;
 
@@ -376,7 +407,7 @@ async fn test_has_reached_daily_limit_no_trims() {
 
 #[tokio::test]
 async fn test_has_reached_daily_limit_with_trims() {
-    let pool = setup_test_db().await;
+    let pool = pool_or_skip!();
     let service = TrimConfigService::new(pool.clone());
     let user_id = create_test_user(&pool).await;
 

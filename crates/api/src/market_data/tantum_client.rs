@@ -7,11 +7,10 @@ use tracing::{debug, info, warn};
 /// Helius API client for wallet analytics and management
 /// 
 /// Provides access to Helius's enhanced Solana RPC APIs for wallet information.
-/// 
-/// API Key: 1266cbb3-f966-49e2-91f0-d3d04e52e69a
+///
+/// The API key is read from the `HELIUS_API_KEY` environment variable at runtime.
 pub struct TantumClient {
     client: Client,
-    api_key: String,
     base_url: String,
     use_mainnet: bool,
 }
@@ -63,7 +62,6 @@ impl TantumClient {
 
         Self {
             client,
-            api_key: api_key.clone(),
             base_url,
             use_mainnet,
         }
@@ -187,7 +185,7 @@ impl TantumClient {
             .ok_or_else(|| Error::ExternalService("Invalid assets format".to_string()))?;
 
         let mut tokens = Vec::new();
-        let mut total_value_usd = sol_usd;
+        let total_value_usd = sol_usd;
 
         for item in items {
             // Extract token information from Helius DAS API format

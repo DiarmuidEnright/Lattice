@@ -12,7 +12,7 @@ use crate::error::{StealthError, StealthResult};
 use crate::generator::StealthAddressOutput;
 use crate::keypair::StealthKeyPair;
 use ed25519_dalek::{Keypair, PublicKey, SecretKey};
-use pqc_kyber::{keypair, encapsulate, KYBER_PUBLICKEYBYTES, KYBER_SECRETKEYBYTES, KYBER_CIPHERTEXTBYTES};
+use pqc_kyber::{keypair, encapsulate, KYBER_PUBLICKEYBYTES};
 use sha2::{Digest, Sha256};
 use solana_sdk::pubkey::Pubkey;
 
@@ -26,7 +26,6 @@ use solana_sdk::pubkey::Pubkey;
 pub struct HybridStealthKeyPair {
     base: StealthKeyPair,
     kyber_public: [u8; KYBER_PUBLICKEYBYTES],
-    kyber_secret: [u8; KYBER_SECRETKEYBYTES],
 }
 
 impl HybridStealthKeyPair {
@@ -49,7 +48,6 @@ impl HybridStealthKeyPair {
         Ok(Self {
             base,
             kyber_public: keys.public,
-            kyber_secret: keys.secret,
         })
     }
 
@@ -161,13 +159,9 @@ impl HybridStealthKeyPair {
         // Create base StealthKeyPair with version 2
         let base = StealthKeyPair::from_parts(spending_keypair, viewing_keypair, 2)?;
         
-        // Create dummy Kyber secret key (all zeros) since we only have public key
-        let kyber_secret = [0u8; KYBER_SECRETKEYBYTES];
-        
         Ok(Self {
             base,
             kyber_public,
-            kyber_secret,
         })
     }
 
@@ -315,6 +309,7 @@ pub struct HybridStealthAddressOutput {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pqc_kyber::KYBER_CIPHERTEXTBYTES;
 
     #[test]
     fn test_generate_hybrid_creates_version_2() {

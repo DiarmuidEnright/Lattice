@@ -1213,6 +1213,29 @@
            UTILITY
            ================================================================ */
         .hidden { display: none !important; }
+
+        /* ---- Data Not Live Banner (shown when backend unreachable at view open) ---- */
+        .data-not-live-banner {
+            position: fixed;
+            top: 64px;
+            left: 0;
+            right: 0;
+            z-index: 1100;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            padding: 10px 16px;
+            background: #2a2000;
+            color: #ffd24d;
+            border-bottom: 1px solid #ffd24d;
+            font-family: var(--font-mono);
+            font-size: 0.72rem;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            text-align: center;
+        }
         .empty-state { text-align: center; color: var(--text-disabled); padding: 3rem; font-size: 0.85rem; font-style: italic; }
         .error-message { color: var(--text-secondary); font-size: 0.75rem; margin-top: 6px; font-family: var(--font-mono); }
 
@@ -1510,6 +1533,13 @@
 </head>
 <body>
     <div class="container">
+        <!-- ================================================================
+             DATA NOT LIVE BANNER — shown only when the backend was not
+             reachable at view open (Requirement 2.5). Hidden by default.
+             ================================================================ -->
+        <div id="dataNotLiveBanner" class="data-not-live-banner hidden" role="alert">
+            ⚠ Backend unavailable — showing sample data (not live)
+        </div>
         <!-- ================================================================
              HEADER
              ================================================================ -->

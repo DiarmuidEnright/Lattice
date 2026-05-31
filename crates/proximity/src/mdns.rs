@@ -10,11 +10,16 @@ use tracing::{debug, info, warn};
 
 const SERVICE_TYPE: &str = "_crypto-p2p._tcp.local.";
 const PROTOCOL_VERSION: &str = "1.0";
+// Service port advertised in the SRV record. It must be non-zero for the
+// announcement to be a resolvable, browsable mDNS service. This is the port a
+// peer would use to open a direct connection after discovery.
+const SERVICE_PORT: u16 = 3000;
 
 /// mDNS Announcer for broadcasting user presence on WiFi
 pub struct MdnsAnnouncer {
     daemon: Arc<ServiceDaemon>,
     service_info: Arc<RwLock<Option<ServiceInfo>>>,
+    user_id: String,
     user_tag: String,
     device_id: String,
     wallet_address: String,
@@ -22,13 +27,19 @@ pub struct MdnsAnnouncer {
 
 impl MdnsAnnouncer {
     /// Create a new MdnsAnnouncer
-    pub fn new(user_tag: String, device_id: String, wallet_address: String) -> Result<Self> {
+    pub fn new(
+        user_id: String,
+        user_tag: String,
+        device_id: String,
+        wallet_address: String,
+    ) -> Result<Self> {
         let daemon = ServiceDaemon::new()
             .map_err(|e| ProximityError::NetworkError(format!("Failed to create mDNS daemon: {}", e)))?;
 
         Ok(Self {
             daemon: Arc::new(daemon),
             service_info: Arc::new(RwLock::new(None)),
+            user_id,
             user_tag,
             device_id,
             wallet_address,
@@ -51,22 +62,35 @@ impl MdnsAnnouncer {
 
         // Build TXT records with user information
         let mut properties = HashMap::new();
+        properties.insert("user_id".to_string(), self.user_id.clone());
         properties.insert("user_tag".to_string(), self.user_tag.clone());
         properties.insert("wallet".to_string(), self.wallet_address.clone());
         properties.insert("device_id".to_string(), self.device_id.clone());
         properties.insert("version".to_string(), PROTOCOL_VERSION.to_string());
 
-        // Create service info
-        // ServiceInfo::new(type, instance, hostname, addresses, port, properties)
+
+        // Create service info.
+        // ServiceInfo::new(type, instance, hostname, ip, port, properties).
+        //
+        // The previous version passed an empty hostname/IP and port 0, which
+        // mdns-sd accepts internally but cannot publish a resolvable SRV/A
+        // record for — so the service registered locally but was invisible on
+        // the wire (not browsable by other devices). We provide a valid
+        // `<instance>.local.` hostname and a non-zero service port, then call
+        // `enable_addr_auto()` so the daemon auto-detects and advertises this
+        // host's LAN IP addresses, making the announcement actually
+        // discoverable by peers.
+        let hostname = format!("{}.local.", instance_name);
         let service_info = ServiceInfo::new(
             SERVICE_TYPE,
             &instance_name,
-            &instance_name,
+            &hostname,
             "",
-            0, // Port 0 means the OS will assign a dynamic port
+            SERVICE_PORT,
             Some(properties),
         )
-        .map_err(|e| ProximityError::NetworkError(format!("Failed to create service info: {}", e)))?;
+        .map_err(|e| ProximityError::NetworkError(format!("Failed to create service info: {}", e)))?
+        .enable_addr_auto();
 
         // Register the service
         self.daemon
@@ -241,11 +265,17 @@ impl MdnsListener {
     fn parse_service_info(info: &ServiceInfo) -> Option<DiscoveredPeer> {
         let properties = info.get_properties();
 
-        // Extract required fields from TXT records
-        let user_tag = properties.get("user_tag")?.to_string();
-        let wallet_address = properties.get("wallet")?.to_string();
-        let device_id = properties.get("device_id")?.to_string();
-        let version = properties.get("version").map(|v| v.to_string());
+        // Extract required fields from TXT records.
+        //
+        // NOTE: `TxtProperty::to_string()` renders the full "key=value" pair, so
+        // using it here previously produced values like "user_tag=system" and a
+        // version of "version=1.0", which made the version check below always
+        // fail ("version=1.0" != "1.0") and silently rejected every peer. Use
+        // `val_str()` to read just the value.
+        let user_tag = properties.get("user_tag")?.val_str().to_string();
+        let wallet_address = properties.get("wallet")?.val_str().to_string();
+        let device_id = properties.get("device_id")?.val_str().to_string();
+        let version = properties.get("version").map(|v| v.val_str().to_string());
 
         // Validate protocol version
         if let Some(v) = version {
@@ -255,10 +285,20 @@ impl MdnsListener {
             }
         }
 
+        // The peer's real user account id. Older/foreign announcements may not
+        // carry it; in that case fall back to a nil UUID so discovery/display
+        // still works (a transfer to a nil recipient will simply be rejected
+        // downstream rather than panicking here).
+        let user_id = properties
+            .get("user_id")
+            .and_then(|v| uuid::Uuid::parse_str(v.val_str()).ok())
+            .unwrap_or_else(uuid::Uuid::nil);
+
         let now = Utc::now();
 
         Some(DiscoveredPeer {
             peer_id: device_id.clone(),
+            user_id,
             user_tag,
             wallet_address,
             discovery_method: DiscoveryMethod::WiFi,
@@ -294,6 +334,7 @@ mod tests {
     #[tokio::test]
     async fn test_mdns_announcer_creation() {
         let announcer = MdnsAnnouncer::new(
+            "00000000-0000-0000-0000-000000000001".to_string(),
             "TestUser".to_string(),
             "device123".to_string(),
             "wallet456".to_string(),
@@ -307,6 +348,7 @@ mod tests {
     #[tokio::test]
     async fn test_mdns_announcer_start_stop() {
         let announcer = MdnsAnnouncer::new(
+            "00000000-0000-0000-0000-000000000001".to_string(),
             "TestUser".to_string(),
             "device123".to_string(),
             "wallet456".to_string(),
@@ -327,6 +369,7 @@ mod tests {
     #[tokio::test]
     async fn test_mdns_announcer_double_start() {
         let announcer = MdnsAnnouncer::new(
+            "00000000-0000-0000-0000-000000000001".to_string(),
             "TestUser".to_string(),
             "device123".to_string(),
             "wallet456".to_string(),

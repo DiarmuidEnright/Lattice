@@ -2,13 +2,44 @@ use api::{ManualOrderRequest, PositionManagementService, PositionMode};
 use database::{create_pool, DbPool};
 use rust_decimal::Decimal;
 use std::str::FromStr;
+use std::time::Duration;
 use uuid::Uuid;
 
-async fn setup_test_db() -> DbPool {
+/// Acquire a test database pool, probing PostgreSQL with a short connect timeout.
+///
+/// Returns `Err` (with a human-readable reason) when the dependency is
+/// unreachable so callers can skip-with-named-reason rather than fail
+/// (Requirement 6.5: skipped distinct from failed for unreachable dependencies).
+async fn setup_test_db() -> Result<DbPool, String> {
     let database_url = std::env::var("DATABASE_URL")
         .unwrap_or_else(|_| "postgresql://postgres:password@localhost:5432/whale_tracker_test".to_string());
-    
-    create_pool(&database_url, 5).await.expect("Failed to create pool")
+
+    let pool = create_pool(&database_url, 5)
+        .await
+        .map_err(|e| format!("failed to create pool: {}", e))?;
+
+    // Probe the dependency: a deadpool `get()` establishes a real connection,
+    // surfacing auth/connectivity errors (e.g. role missing). Bound it with a
+    // short timeout so an unreachable host does not hang the suite.
+    match tokio::time::timeout(Duration::from_secs(3), pool.get()).await {
+        Ok(Ok(_client)) => Ok(pool),
+        Ok(Err(e)) => Err(format!("connection failed: {}", e)),
+        Err(_) => Err("connection timed out after 3s".to_string()),
+    }
+}
+
+/// Acquire a pool or skip the current test with a named reason when PostgreSQL
+/// is unreachable. Expands to an early `return` on the skip path.
+macro_rules! pool_or_skip {
+    () => {
+        match setup_test_db().await {
+            Ok(pool) => pool,
+            Err(reason) => {
+                eprintln!("SKIPPED: PostgreSQL unavailable — {}", reason);
+                return;
+            }
+        }
+    };
 }
 
 async fn create_test_user(pool: &DbPool) -> Uuid {
@@ -49,7 +80,7 @@ async fn create_test_wallet_with_balance(pool: &DbPool, user_id: Uuid, asset: &s
 
 #[tokio::test]
 async fn test_default_position_mode_is_manual() {
-    let pool = setup_test_db().await;
+    let pool = pool_or_skip!();
     let service = PositionManagementService::new(pool.clone());
     let user_id = create_test_user(&pool).await;
     
@@ -63,7 +94,7 @@ async fn test_default_position_mode_is_manual() {
 
 #[tokio::test]
 async fn test_set_position_mode_to_automatic() {
-    let pool = setup_test_db().await;
+    let pool = pool_or_skip!();
     let service = PositionManagementService::new(pool.clone());
     let user_id = create_test_user(&pool).await;
     
@@ -87,7 +118,7 @@ async fn test_set_position_mode_to_automatic() {
 
 #[tokio::test]
 async fn test_switch_to_manual_cancels_pending_orders() {
-    let pool = setup_test_db().await;
+    let pool = pool_or_skip!();
     let service = PositionManagementService::new(pool.clone());
     let user_id = create_test_user(&pool).await;
     
@@ -133,7 +164,7 @@ async fn test_switch_to_manual_cancels_pending_orders() {
 
 #[tokio::test]
 async fn test_create_manual_buy_order() {
-    let pool = setup_test_db().await;
+    let pool = pool_or_skip!();
     let service = PositionManagementService::new(pool.clone());
     let user_id = create_test_user(&pool).await;
     
@@ -154,7 +185,7 @@ async fn test_create_manual_buy_order() {
 
 #[tokio::test]
 async fn test_create_manual_sell_order_validates_balance() {
-    let pool = setup_test_db().await;
+    let pool = pool_or_skip!();
     let service = PositionManagementService::new(pool.clone());
     let user_id = create_test_user(&pool).await;
     
@@ -187,7 +218,7 @@ async fn test_create_manual_sell_order_validates_balance() {
 
 #[tokio::test]
 async fn test_create_manual_order_rejects_invalid_action() {
-    let pool = setup_test_db().await;
+    let pool = pool_or_skip!();
     let service = PositionManagementService::new(pool.clone());
     let user_id = create_test_user(&pool).await;
     
@@ -205,7 +236,7 @@ async fn test_create_manual_order_rejects_invalid_action() {
 
 #[tokio::test]
 async fn test_create_manual_order_rejects_negative_amount() {
-    let pool = setup_test_db().await;
+    let pool = pool_or_skip!();
     let service = PositionManagementService::new(pool.clone());
     let user_id = create_test_user(&pool).await;
     
@@ -223,7 +254,7 @@ async fn test_create_manual_order_rejects_negative_amount() {
 
 #[tokio::test]
 async fn test_get_user_manual_orders() {
-    let pool = setup_test_db().await;
+    let pool = pool_or_skip!();
     let service = PositionManagementService::new(pool.clone());
     let user_id = create_test_user(&pool).await;
     
@@ -247,7 +278,7 @@ async fn test_get_user_manual_orders() {
 
 #[tokio::test]
 async fn test_cancel_manual_order() {
-    let pool = setup_test_db().await;
+    let pool = pool_or_skip!();
     let service = PositionManagementService::new(pool.clone());
     let user_id = create_test_user(&pool).await;
     
@@ -271,7 +302,7 @@ async fn test_cancel_manual_order() {
 
 #[tokio::test]
 async fn test_cannot_cancel_executed_order() {
-    let pool = setup_test_db().await;
+    let pool = pool_or_skip!();
     let service = PositionManagementService::new(pool.clone());
     let user_id = create_test_user(&pool).await;
     
@@ -304,7 +335,7 @@ async fn test_cannot_cancel_executed_order() {
 
 #[tokio::test]
 async fn test_register_pending_automatic_order_requires_automatic_mode() {
-    let pool = setup_test_db().await;
+    let pool = pool_or_skip!();
     let service = PositionManagementService::new(pool.clone());
     let user_id = create_test_user(&pool).await;
     
@@ -349,7 +380,7 @@ async fn test_register_pending_automatic_order_requires_automatic_mode() {
 
 #[tokio::test]
 async fn test_get_user_position_modes() {
-    let pool = setup_test_db().await;
+    let pool = pool_or_skip!();
     let service = PositionManagementService::new(pool.clone());
     let user_id = create_test_user(&pool).await;
     

@@ -276,9 +276,6 @@ impl AlertManager {
                 warn!("⚠️  WARNING ALERT [{}]: {}", service, message);
                 // In production: send to monitoring dashboard, Slack, etc.
             }
-            AlertLevel::Info => {
-                info!("ℹ️  INFO ALERT [{}]: {}", service, message);
-            }
         }
     }
 }
@@ -287,7 +284,6 @@ impl AlertManager {
 enum AlertLevel {
     Critical,
     Warning,
-    Info,
 }
 
 #[cfg(test)]

@@ -16,3 +16,5 @@ tracing.workspace = true
 
 [dev-dependencies]
 tokio.workspace = true
+# Property-based testing (Property 7: fail-fast config invariant)
+proptest = "1.4"

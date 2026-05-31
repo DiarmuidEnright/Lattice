@@ -440,6 +440,12 @@ impl MeshOperationTimer {
     /// Complete the timer and record message propagation
     pub async fn complete_propagation(self, message_id: Uuid) {
         let duration_ms = self.elapsed_ms();
+        tracing::debug!(
+            operation = %self.operation,
+            message_id = %message_id,
+            duration_ms = duration_ms,
+            "Completed mesh operation, recording propagation latency"
+        );
         self.metrics.record_message_propagation(message_id, duration_ms).await;
     }
 }

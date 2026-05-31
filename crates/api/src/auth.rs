@@ -515,9 +515,20 @@ impl JwtConfig {
         
         let stored_hash: String = row.get(0);
         
-        // Verify password against hash
-        let parsed_hash = PasswordHash::new(&stored_hash)
-            .map_err(|e| AuthError::HashingError(e.to_string()))?;
+        // Verify password against hash. A stored hash that isn't a valid
+        // Argon2 PHC string (e.g. legacy/seed/demo data) must NOT crash auth —
+        // treat it as a failed verification so the caller returns "invalid
+        // password" (401) rather than a 500 server error.
+        let parsed_hash = match PasswordHash::new(&stored_hash) {
+            Ok(h) => h,
+            Err(e) => {
+                tracing::warn!(
+                    "Stored password hash for user {} is not a valid Argon2 hash ({}); treating as failed verification",
+                    user_id, e
+                );
+                return Ok(false);
+            }
+        };
         
         let argon2 = Argon2::default();
         Ok(argon2.verify_password(password.as_bytes(), &parsed_hash).is_ok())

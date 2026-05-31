@@ -299,7 +299,7 @@ impl PriceMonitor {
         
         client
             .execute(
-                "INSERT INTO notifications (id, user_id, type, title, message, data, priority, read, created_at)
+                "INSERT INTO notifications (id, user_id, notification_type, title, message, data, priority, read, created_at)
                  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
                 &[
                     &notification.id,
@@ -384,7 +384,7 @@ impl PriceMonitor {
             
             client
                 .execute(
-                    "INSERT INTO notifications (id, user_id, type, title, message, data, priority, read, created_at)
+                    "INSERT INTO notifications (id, user_id, notification_type, title, message, data, priority, read, created_at)
                      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
                     &[
                         &notification.id,
@@ -502,7 +502,7 @@ impl PriceMonitor {
         
         client
             .execute(
-                "INSERT INTO notifications (id, user_id, type, title, message, data, priority, read, created_at)
+                "INSERT INTO notifications (id, user_id, notification_type, title, message, data, priority, read, created_at)
                  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
                 &[
                     &notification.id,

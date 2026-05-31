@@ -9,11 +9,38 @@ use solana_sdk::{
 };
 use std::str::FromStr;
 use std::sync::Arc;
+use std::time::Duration;
 use tracing::{debug, error, info, warn};
 
 use crate::circuit_breaker::{CircuitBreaker, CircuitBreakerConfig};
 use crate::retry::{retry_with_backoff, RetryConfig};
 use crate::types::{TokenAccount, WalletBalance};
+
+/// Per-request timeout for the (blocking) Solana RPC client. Devnet can be
+/// flaky; without an explicit timeout the underlying client waits ~30s, which
+/// blocks the calling worker thread and starves the async runtime. Keep this
+/// well under the frontend's 10s fetch timeout so a slow RPC degrades to a
+/// fast, clean error instead of hanging the whole dashboard.
+const RPC_REQUEST_TIMEOUT: Duration = Duration::from_secs(4);
+
+/// Run a blocking closure without starving the async runtime.
+///
+/// The Solana `RpcClient` used here is synchronous/blocking. Calling it
+/// directly on a tokio worker thread blocks that worker; enough concurrent
+/// blocking calls starve the runtime and make *unrelated* endpoints time out.
+/// On the multi-threaded runtime (the API server) we hand the work to
+/// `block_in_place` so tokio can relocate other tasks. On a current-thread
+/// runtime or outside any runtime (unit tests) we just run it inline, since
+/// `block_in_place` would panic there.
+fn run_blocking<T>(f: impl FnOnce() -> T) -> T {
+    use tokio::runtime::{Handle, RuntimeFlavor};
+    match Handle::try_current() {
+        Ok(handle) if handle.runtime_flavor() == RuntimeFlavor::MultiThread => {
+            tokio::task::block_in_place(f)
+        }
+        _ => f(),
+    }
+}
 
 /// Stealth payment metadata found on-chain
 #[derive(Debug, Clone)]
@@ -109,14 +136,19 @@ impl SolanaClient {
     pub fn new(rpc_url: String, fallback_url: Option<String>) -> Self {
         info!("Initializing Solana client with primary RPC: {}", rpc_url);
         
-        let primary_client = RpcClient::new_with_commitment(
+        let primary_client = RpcClient::new_with_timeout_and_commitment(
             rpc_url.clone(),
+            RPC_REQUEST_TIMEOUT,
             CommitmentConfig::confirmed(),
         );
 
         let fallback_client = fallback_url.as_ref().map(|url| {
             info!("Configuring fallback RPC: {}", url);
-            RpcClient::new_with_commitment(url.clone(), CommitmentConfig::confirmed())
+            RpcClient::new_with_timeout_and_commitment(
+                url.clone(),
+                RPC_REQUEST_TIMEOUT,
+                CommitmentConfig::confirmed(),
+            )
         });
 
         // Create circuit breakers for primary and fallback
@@ -151,13 +183,18 @@ impl SolanaClient {
     ) -> Self {
         info!("Initializing Solana client with custom config");
         
-        let primary_client = RpcClient::new_with_commitment(
+        let primary_client = RpcClient::new_with_timeout_and_commitment(
             rpc_url.clone(),
+            RPC_REQUEST_TIMEOUT,
             CommitmentConfig::confirmed(),
         );
 
         let fallback_client = fallback_url.as_ref().map(|url| {
-            RpcClient::new_with_commitment(url.clone(), CommitmentConfig::confirmed())
+            RpcClient::new_with_timeout_and_commitment(
+                url.clone(),
+                RPC_REQUEST_TIMEOUT,
+                CommitmentConfig::confirmed(),
+            )
         });
 
         let primary_circuit_breaker = Arc::new(CircuitBreaker::new(
@@ -203,7 +240,7 @@ impl SolanaClient {
                 let client = &self.primary_client;
                 let pk = pubkey;
                 async move {
-                    client.get_balance(&pk).map_err(|e| {
+                    run_blocking(|| client.get_balance(&pk)).map_err(|e| {
                         Error::SolanaRpc(format!("Primary RPC failed: {}", e))
                     })
                 }
@@ -231,7 +268,7 @@ impl SolanaClient {
                             let client = fallback;
                             let pk = pubkey;
                             async move {
-                                client.get_balance(&pk).map_err(|e| {
+                                run_blocking(|| client.get_balance(&pk)).map_err(|e| {
                                     Error::SolanaRpc(format!("Fallback RPC failed: {}", e))
                                 })
                             }
@@ -269,16 +306,17 @@ impl SolanaClient {
                 let client = &self.primary_client;
                 let pk = pubkey;
                 async move {
-                    client
-                        .get_token_accounts_by_owner(
+                    run_blocking(|| {
+                        client.get_token_accounts_by_owner(
                             &pk,
                             solana_client::rpc_request::TokenAccountsFilter::ProgramId(
                                 spl_token::id(),
                             ),
                         )
-                        .map_err(|e| {
-                            Error::SolanaRpc(format!("Primary RPC failed: {}", e))
-                        })
+                    })
+                    .map_err(|e| {
+                        Error::SolanaRpc(format!("Primary RPC failed: {}", e))
+                    })
                 }
             },
         ).await;
@@ -301,16 +339,17 @@ impl SolanaClient {
                             let client = fallback;
                             let pk = pubkey;
                             async move {
-                                client
-                                    .get_token_accounts_by_owner(
+                                run_blocking(|| {
+                                    client.get_token_accounts_by_owner(
                                         &pk,
                                         solana_client::rpc_request::TokenAccountsFilter::ProgramId(
                                             spl_token::id(),
                                         ),
                                     )
-                                    .map_err(|e| {
-                                        Error::SolanaRpc(format!("Fallback RPC failed: {}", e))
-                                    })
+                                })
+                                .map_err(|e| {
+                                    Error::SolanaRpc(format!("Fallback RPC failed: {}", e))
+                                })
                             }
                         },
                     ).await?

@@ -284,7 +284,32 @@ pub async fn get_portfolio(
     Path(address): Path<String>,
 ) -> Result<Json<ApiResponse<shared::models::Portfolio>>, (StatusCode, Json<ApiResponse<shared::models::Portfolio>>)> {
     tracing::info!("get_portfolio handler called for address: {}", address);
-    
+
+    // Bound the whole operation so a slow/flaky devnet RPC can never exceed the
+    // frontend's 10s fetch timeout. If we blow past this we return a fast, clean
+    // 504 instead of letting the browser abort the request itself.
+    const PORTFOLIO_DEADLINE: std::time::Duration = std::time::Duration::from_secs(8);
+
+    let fetch = get_portfolio_inner(state, address.clone());
+    match tokio::time::timeout(PORTFOLIO_DEADLINE, fetch).await {
+        Ok(result) => result,
+        Err(_) => {
+            tracing::warn!("get_portfolio timed out for {} after {:?}", address, PORTFOLIO_DEADLINE);
+            Err((
+                StatusCode::GATEWAY_TIMEOUT,
+                Json(ApiResponse::error(format!(
+                    "Portfolio lookup timed out for {}. The blockchain RPC may be slow; please retry.",
+                    address
+                ))),
+            ))
+        }
+    }
+}
+
+async fn get_portfolio_inner(
+    state: Arc<AppState>,
+    address: String,
+) -> Result<Json<ApiResponse<shared::models::Portfolio>>, (StatusCode, Json<ApiResponse<shared::models::Portfolio>>)> {
     // Try to get existing portfolio
     match state.wallet_service.get_portfolio(&address).await {
         Ok(portfolio) => {
@@ -326,10 +351,226 @@ pub async fn get_portfolio(
 
 // Whale Tracking
 pub async fn get_tracked_whales(
-    State(_state): State<Arc<AppState>>,
+    State(state): State<Arc<AppState>>,
 ) -> impl IntoResponse {
-    // TODO: Implement get tracked whales
-    (StatusCode::NOT_IMPLEMENTED, Json(ApiResponse::<()>::error("Not implemented".to_string())))
+    // Return the tracked whales ordered by value. The frontend expects each
+    // item to expose `address`, `total_value_usd`, `multiplier`, and `rank`.
+    // `rank` is the 1-based position by descending value; `multiplier` is the
+    // whale's value relative to the smallest tracked whale (>= 1.0).
+    let client = match state.db_pool.get().await {
+        Ok(c) => c,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse::<serde_json::Value>::error(format!(
+                    "Database error: {}",
+                    e
+                ))),
+            );
+        }
+    };
+
+    let rows = match client
+        .query(
+            "SELECT address, total_value_usd, first_detected, last_checked
+             FROM whales
+             ORDER BY total_value_usd DESC
+             LIMIT 100",
+            &[],
+        )
+        .await
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse::<serde_json::Value>::error(format!(
+                    "Failed to query whales: {}",
+                    e
+                ))),
+            );
+        }
+    };
+
+    use rust_decimal::prelude::ToPrimitive;
+    // Smallest tracked value (last row, since ordered DESC) is the multiplier base.
+    let min_value: f64 = rows
+        .last()
+        .and_then(|r| r.get::<_, rust_decimal::Decimal>(1).to_f64())
+        .filter(|v| *v > 0.0)
+        .unwrap_or(1.0);
+
+    let whales: Vec<serde_json::Value> = rows
+        .iter()
+        .enumerate()
+        .map(|(idx, row)| {
+            let address: String = row.get(0);
+            let total_value_usd: f64 = row
+                .get::<_, rust_decimal::Decimal>(1)
+                .to_f64()
+                .unwrap_or(0.0);
+            let multiplier = if min_value > 0.0 {
+                (total_value_usd / min_value * 10.0).round() / 10.0
+            } else {
+                1.0
+            };
+            serde_json::json!({
+                "address": address,
+                "total_value_usd": total_value_usd,
+                "multiplier": multiplier,
+                "rank": idx + 1,
+            })
+        })
+        .collect();
+
+    (StatusCode::OK, Json(ApiResponse::success(serde_json::json!(whales))))
+}
+
+/// List a user's wallets with freeze status for the wallet-freeze view.
+///
+/// Backs `GET /api/privacy/:user_id/wallets`. The frontend expects each item to
+/// expose `address`, `blockchain`, `is_primary`, `is_frozen`, and `frozen_at`.
+/// Data comes from `multi_chain_wallets` (which carries the freeze columns).
+pub async fn get_user_wallets_freeze_status(
+    State(state): State<Arc<AppState>>,
+    Path(user_id): Path<Uuid>,
+) -> impl IntoResponse {
+    let client = match state.db_pool.get().await {
+        Ok(c) => c,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse::<serde_json::Value>::error(format!(
+                    "Database error: {}",
+                    e
+                ))),
+            );
+        }
+    };
+
+    let rows = match client
+        .query(
+            "SELECT address, blockchain, is_primary, is_frozen, frozen_at
+             FROM multi_chain_wallets
+             WHERE user_id = $1
+             ORDER BY is_primary DESC, created_at ASC",
+            &[&user_id],
+        )
+        .await
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse::<serde_json::Value>::error(format!(
+                    "Failed to query wallets: {}",
+                    e
+                ))),
+            );
+        }
+    };
+
+    let wallets: Vec<serde_json::Value> = rows
+        .iter()
+        .map(|row| {
+            let address: String = row.get(0);
+            let blockchain: String = row.get(1);
+            let is_primary: bool = row.get(2);
+            let is_frozen: bool = row.get(3);
+            // frozen_at is `timestamp without time zone`; read as NaiveDateTime
+            // (reading into DateTime<Utc> would panic) and emit ISO-8601.
+            let frozen_at: Option<chrono::NaiveDateTime> = row.get(4);
+            serde_json::json!({
+                "address": address,
+                "blockchain": blockchain,
+                "is_primary": is_primary,
+                "is_frozen": is_frozen,
+                "frozen_at": frozen_at.map(|t| t.and_utc().to_rfc3339()),
+            })
+        })
+        .collect();
+
+    (StatusCode::OK, Json(ApiResponse::success(serde_json::json!(wallets))))
+}
+
+/// Recent AI actions for the analytics view.
+///
+/// Backs `GET /api/analytics/:user_id/ai-actions`. The frontend expects each
+/// item to expose `action_type`, `asset`, `description`, `reasoning`,
+/// `profit_realized`, and `created_at`. Executed agentic trims (the concrete
+/// AI-driven actions the system records) are sourced from `trim_executions`.
+pub async fn get_ai_actions(
+    State(state): State<Arc<AppState>>,
+    Path(user_id): Path<Uuid>,
+) -> impl IntoResponse {
+    let client = match state.db_pool.get().await {
+        Ok(c) => c,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse::<serde_json::Value>::error(format!(
+                    "Database error: {}",
+                    e
+                ))),
+            );
+        }
+    };
+
+    let rows = match client
+        .query(
+            "SELECT asset, amount_sold, price_usd, profit_realized, confidence,
+                    reasoning, executed_at
+             FROM trim_executions
+             WHERE user_id = $1
+             ORDER BY executed_at DESC
+             LIMIT 50",
+            &[&user_id],
+        )
+        .await
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse::<serde_json::Value>::error(format!(
+                    "Failed to query AI actions: {}",
+                    e
+                ))),
+            );
+        }
+    };
+
+    use rust_decimal::prelude::ToPrimitive;
+    let actions: Vec<serde_json::Value> = rows
+        .iter()
+        .map(|row| {
+            let asset: String = row.get(0);
+            let amount_sold = row
+                .get::<_, rust_decimal::Decimal>(1)
+                .to_f64()
+                .unwrap_or(0.0);
+            let price_usd = row
+                .get::<_, rust_decimal::Decimal>(2)
+                .to_f64()
+                .unwrap_or(0.0);
+            let profit_realized = row
+                .get::<_, Option<rust_decimal::Decimal>>(3)
+                .and_then(|d| d.to_f64());
+            let reasoning: Option<String> = row.get(5);
+            // executed_at is `timestamp without time zone`.
+            let executed_at: Option<chrono::NaiveDateTime> = row.get(6);
+            serde_json::json!({
+                "action_type": "trim",
+                "asset": asset,
+                "description": format!("Trimmed {:.4} {} at ${:.2}", amount_sold, asset, price_usd),
+                "reasoning": reasoning,
+                "profit_realized": profit_realized,
+                "created_at": executed_at.map(|t| t.and_utc().to_rfc3339()),
+            })
+        })
+        .collect();
+
+    (StatusCode::OK, Json(ApiResponse::success(serde_json::json!(actions))))
 }
 
 pub async fn get_whale_details(
@@ -2119,79 +2360,30 @@ pub async fn get_offer(
     State(state): State<Arc<AppState>>,
     Path(offer_id): Path<Uuid>,
 ) -> Result<Json<ApiResponse<crate::P2POffer>>, (StatusCode, Json<ApiResponse<crate::P2POffer>>)> {
-    // Get offer from database directly since there's no get_offer method
-    let client = match state.db_pool.get().await {
-        Ok(c) => c,
+    // Delegate to the P2P service rather than hand-rolling the row mapping here.
+    // The previous inline version read `created_at`/`expires_at` (Postgres
+    // `timestamp without time zone`) directly into `DateTime<Utc>`, which
+    // panics at runtime, and it dropped the acceptor/accepted_at/conversation
+    // fields. `P2PService::get_offer` maps every column correctly via
+    // `row_to_offer` (reading the timestamps as `SystemTime` first).
+    match state.p2p_service.get_offer(offer_id).await {
+        Ok(offer) => Ok(Json(ApiResponse::success(offer))),
         Err(e) => {
-            return Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ApiResponse::error(format!("Database error: {}", e))),
-            ));
+            // A missing offer is a 404; anything else is a 500.
+            let msg = e.to_string();
+            if msg.contains("not found") {
+                Err((
+                    StatusCode::NOT_FOUND,
+                    Json(ApiResponse::error("Offer not found".to_string())),
+                ))
+            } else {
+                Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ApiResponse::error(format!("Database error: {}", msg))),
+                ))
+            }
         }
-    };
-
-    let row = match client
-        .query_opt(
-            "SELECT id, user_id, offer_type, from_asset, to_asset, from_amount, to_amount, 
-                    price, status, escrow_tx_hash, matched_with_offer_id, is_proximity_offer, created_at, expires_at
-             FROM p2p_offers WHERE id = $1",
-            &[&offer_id],
-        )
-        .await
-    {
-        Ok(Some(row)) => row,
-        Ok(None) => {
-            return Err((
-                StatusCode::NOT_FOUND,
-                Json(ApiResponse::error("Offer not found".to_string())),
-            ));
-        }
-        Err(e) => {
-            return Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ApiResponse::error(format!("Database error: {}", e))),
-            ));
-        }
-    };
-
-    let offer_type_str: String = row.get(2);
-    let offer_type = match offer_type_str.as_str() {
-        "BUY" => crate::OfferType::Buy,
-        "SELL" => crate::OfferType::Sell,
-        _ => crate::OfferType::Buy,
-    };
-
-    let status_str: String = row.get(8);
-    let status = match status_str.as_str() {
-        "ACTIVE" => crate::OfferStatus::Active,
-        "MATCHED" => crate::OfferStatus::Matched,
-        "EXECUTED" => crate::OfferStatus::Executed,
-        "CANCELLED" => crate::OfferStatus::Cancelled,
-        "EXPIRED" => crate::OfferStatus::Expired,
-        _ => crate::OfferStatus::Active,
-    };
-
-    let offer = crate::P2POffer {
-        id: row.get(0),
-        user_id: row.get(1),
-        offer_type,
-        from_asset: row.get(3),
-        to_asset: row.get(4),
-        from_amount: row.get(5),
-        to_amount: row.get(6),
-        price: row.get(7),
-        status,
-        escrow_tx_hash: row.get(9),
-        matched_with_offer_id: row.get(10),
-        is_proximity_offer: row.get(11),
-        acceptor_id: None,
-        accepted_at: None,
-        conversation_id: None,
-        created_at: row.get(12),
-        expires_at: row.get(13),
-    };
-
-    Ok(Json(ApiResponse::success(offer)))
+    }
 }
 
 /// Accept a P2P offer
@@ -2658,17 +2850,27 @@ pub async fn health_check(State(state): State<Arc<AppState>>) -> impl IntoRespon
         services_health.insert(service.to_string(), health);
     }
     
-    // Determine overall health
-    let all_healthy = services_health.values().all(|h| matches!(h, crate::monitoring::HealthStatus::Healthy));
-    
-    let status = if all_healthy {
-        StatusCode::OK
-    } else {
+    // Determine overall health. A freshly-started backend has not yet served
+    // traffic to every dependency, so those services report `Unknown` rather
+    // than `Healthy`. `Unknown` means "no signal yet", not "failing", so it must
+    // not force a 503 on an otherwise-healthy startup. Overall health is only
+    // unavailable when a service is actively `Degraded` or `Unhealthy`.
+    let any_unhealthy = services_health.values().any(|h| {
+        matches!(
+            h,
+            crate::monitoring::HealthStatus::Degraded { .. }
+                | crate::monitoring::HealthStatus::Unhealthy { .. }
+        )
+    });
+
+    let status = if any_unhealthy {
         StatusCode::SERVICE_UNAVAILABLE
+    } else {
+        StatusCode::OK
     };
-    
+
     (status, Json(serde_json::json!({
-        "status": if all_healthy { "healthy" } else { "unhealthy" },
+        "status": if any_unhealthy { "unhealthy" } else { "healthy" },
         "timestamp": chrono::Utc::now().to_rfc3339(),
         "services": services_health,
     })))
@@ -3026,7 +3228,58 @@ pub async fn generate_stealth_address(
     Ok(Json(ApiResponse::success(response)))
 }
 
-/// Prepare a stealth payment (generate stealth address for receiver)
+/// Request to encode a stealth meta-address as a QR code.
+#[derive(Deserialize)]
+pub struct StealthQrEncodeRequest {
+    pub meta_address: String,
+}
+
+/// Encode a stealth meta-address into a scannable QR code (SVG image).
+///
+/// Backs `POST /api/stealth/qr-encode`. The frontend consumes the response as an
+/// image blob and renders it in an `<img>`, so we return an SVG body with an
+/// `image/svg+xml` content type. The meta-address is encoded verbatim; nothing
+/// is persisted.
+pub async fn qr_encode_stealth(
+    State(_state): State<Arc<AppState>>,
+    Json(payload): Json<StealthQrEncodeRequest>,
+) -> impl IntoResponse {
+    if payload.meta_address.trim().is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            [("Content-Type", "application/json")],
+            b"{\"success\":false,\"error\":\"meta_address is required\"}".to_vec(),
+        )
+            .into_response();
+    }
+
+    let code = match qrcode::QrCode::new(payload.meta_address.as_bytes()) {
+        Ok(c) => c,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                [("Content-Type", "application/json")],
+                format!("{{\"success\":false,\"error\":\"Failed to generate QR code: {}\"}}", e)
+                    .into_bytes(),
+            )
+                .into_response();
+        }
+    };
+
+    let svg = code
+        .render::<qrcode::render::svg::Color>()
+        .min_dimensions(300, 300)
+        .build();
+
+    (
+        StatusCode::OK,
+        [("Content-Type", "image/svg+xml")],
+        svg.into_bytes(),
+    )
+        .into_response()
+}
+
+
 /// Requirements: 10.3 (2.3, 2.4, 2.5)
 pub async fn prepare_stealth_payment(
     State(_state): State<Arc<AppState>>,

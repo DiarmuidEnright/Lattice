@@ -211,8 +211,16 @@ impl PositionEvaluator {
             for asset_row in asset_rows {
                 let token_mint: String = asset_row.get(0);
                 let token_symbol: String = asset_row.get(1);
-                let amount: String = asset_row.get(2);
-                let value_usd: Option<f64> = asset_row.get(3);
+                // `amount` and `value_usd` are Postgres NUMERIC (DECIMAL(36,18) /
+                // DECIMAL(18,2)); read them as `Decimal` (the only type that
+                // implements FromSql for NUMERIC here) and convert to the
+                // `String`/`Option<f64>` shape the `Asset` model expects.
+                // Reading them directly as String/f64 panics at runtime.
+                let amount_decimal: Decimal = asset_row.get(2);
+                let amount: String = amount_decimal.to_string();
+                let value_usd: Option<f64> = asset_row
+                    .get::<_, Option<Decimal>>(3)
+                    .and_then(|v| v.to_string().parse::<f64>().ok());
 
                 // Calculate profit (simplified - in production would need historical entry price)
                 // For now, we'll estimate based on current value

@@ -1,51 +1,61 @@
-pub mod error;
-pub mod monitoring;
-pub mod logging;
 pub mod wallet_service;
-pub mod portfolio_cache;
 pub mod whale_detection;
 pub mod portfolio_monitor;
 pub mod analytics;
 pub mod auth;
 pub mod routes;
 pub mod handlers;
-pub mod rate_limit;
-pub mod security;
-pub mod birdeye_service;
-pub mod coinmarketcap_service;
-pub mod tantum_client;
-pub mod benchmark_service;
-pub mod price_monitor;
-pub mod sideshift_client;
-pub mod conversion_service;
-pub mod staking_service;
-pub mod trim_config_service;
-pub mod position_evaluator;
-pub mod trim_executor;
 pub mod receipt_service;
 pub mod payment_receipt_service;
-pub mod chat_service;
-pub mod p2p_service;
-pub mod verification_service;
-pub mod privacy_service;
-pub mod websocket_service;
-pub mod position_management_service;
-pub mod token_metadata_service;
+
+// Cross-cutting infrastructure: error types, monitoring/metrics, logging,
+// rate limiting, security middleware, and the dashboard WebSocket service.
+// NOTE: the `monitoring` child shares its name with the external `monitoring`
+// crate dependency; the local module shadows it at the crate root as before.
+pub mod infra;
+pub use infra::{error, monitoring, logging, rate_limit, security, websocket_service};
+
+// Market-data provider integrations (CoinMarketCap, Birdeye, Tantum/Helius,
+// SideShift, token metadata, portfolio cache).
+pub mod market_data;
+pub use market_data::{
+    coinmarketcap_service, birdeye_service, tantum_client, sideshift_client,
+    token_metadata_service, portfolio_cache,
+};
+
+// Trading subsystem (benchmarks/triggers, positions, staking, conversion, trims).
+// NOTE: this local module shares its name with the external `trading` crate
+// dependency; child modules refer to the external crate as `::trading`.
+pub mod trading;
+pub use trading::{
+    benchmark_service, price_monitor, conversion_service, staking_service,
+    trim_config_service, trim_executor, position_evaluator, position_management_service,
+};
+
+// Peer-to-peer exchange subsystem (offers/exchanges, chat, verification, privacy).
+pub mod p2p;
+pub use p2p::{p2p_service, chat_service, verification_service, privacy_service};
+
 pub mod cross_chain_transaction_service;
-pub mod proximity_receipt_integration;
-pub mod proximity_service;
-pub mod proximity_handlers;
-pub mod proximity_websocket;
-pub mod mesh_types;
-pub mod message_tracker;
-pub mod price_cache;
-pub mod coordination_service;
-pub mod gossip_protocol;
-pub mod provider_node;
-pub mod network_status_tracker;
-pub mod mesh_price_service;
-pub mod price_update_validator;
-pub mod mesh_metrics;
+
+// Proximity-based P2P transfer subsystem (API layer).
+// NOTE: this local module shares its name with the external `proximity`
+// crate dependency; at the crate root the external crate is referred to as
+// `::proximity` (see the `use ::proximity::{...}` import below).
+pub mod proximity;
+pub use proximity::{
+    proximity_receipt_integration, proximity_service, proximity_handlers, proximity_websocket,
+};
+
+// Mesh networking + distributed price-data subsystem.
+// Child modules are re-exported below so existing paths
+// (`crate::mesh_types::*`, `api::MeshPriceService`, ...) keep resolving.
+pub mod mesh;
+pub use mesh::{
+    mesh_types, mesh_metrics, message_tracker, price_cache, price_update_validator,
+    coordination_service, gossip_protocol, provider_node, network_status_tracker,
+    mesh_price_service,
+};
 
 pub use wallet_service::WalletService;
 pub use portfolio_cache::PortfolioCache;
@@ -99,7 +109,9 @@ use blockchain::SolanaClient;
 use deadpool_postgres::Pool;
 use redis::aio::ConnectionManager;
 use std::sync::Arc;
-use proximity::{DiscoveryService, TransferService, SessionManager, AuthenticationService};
+// `::proximity` (leading `::`) refers to the external `proximity` crate, not the
+// local `proximity` submodule declared above which shares the same name.
+use ::proximity::{DiscoveryService, TransferService, SessionManager, AuthenticationService};
 
 /// Application state shared across handlers
 #[derive(Clone)]

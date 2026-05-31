@@ -3,7 +3,7 @@
 use crate::error::{StealthError, StealthResult};
 use crate::generator::StealthAddressGenerator;
 use crate::keypair::StealthKeyPair;
-use crate::payment_queue::{PaymentQueue, PaymentStatus};
+use crate::payment_queue::PaymentStatus;
 use crate::scanner::{DetectedPayment, StealthScanner};
 use serde::{Deserialize, Serialize};
 use solana_client::rpc_client::RpcClient;
@@ -141,7 +141,7 @@ impl StealthWalletManager {
         // the payment queue component (requires payer keypair and network monitor)
         
         // Get recent blockhash
-        let recent_blockhash = self.rpc_client
+        let _recent_blockhash = self.rpc_client
             .get_latest_blockhash()
             .map_err(|e| {
                 error!("Failed to get recent blockhash: {}", e);
@@ -436,6 +436,34 @@ mod tests {
     use super::*;
     use crate::keypair::StealthKeyPair;
 
+    /// Probe the Solana RPC endpoint with a short timeout.
+    ///
+    /// Returns `Err` (with a human-readable reason) when the endpoint is
+    /// unreachable so callers can skip-with-named-reason rather than fail
+    /// (Requirement 6.5: skipped distinct from failed for unreachable
+    /// dependencies). The blocking RPC call runs on a blocking thread and is
+    /// bounded by an outer timeout so it cannot hang the suite.
+    async fn probe_solana_rpc(rpc_url: &str) -> Result<(), String> {
+        let url = rpc_url.to_string();
+        let probe = tokio::task::spawn_blocking(move || {
+            let client = RpcClient::new_with_timeout_and_commitment(
+                url,
+                std::time::Duration::from_secs(3),
+                CommitmentConfig::confirmed(),
+            );
+            // `get_latest_blockhash` is the exact RPC the dependent tests rely
+            // on; if it succeeds the endpoint is reachable.
+            client.get_latest_blockhash()
+        });
+
+        match tokio::time::timeout(std::time::Duration::from_secs(5), probe).await {
+            Ok(Ok(Ok(_))) => Ok(()),
+            Ok(Ok(Err(e))) => Err(format!("RPC request failed: {}", e)),
+            Ok(Err(e)) => Err(format!("probe task failed: {}", e)),
+            Err(_) => Err("RPC probe timed out after 5s".to_string()),
+        }
+    }
+
     #[test]
     fn test_create_stealth_metadata_instruction() {
         let ephemeral_pk = Pubkey::new_unique();
@@ -674,11 +702,21 @@ mod tests {
     async fn test_send_payment_returns_queued_status() {
         // Note: This is a simplified test since full send_payment implementation
         // requires payer keypair and network monitor integration
-        
+
+        const RPC_URL: &str = "https://api.devnet.solana.com";
+
+        // send_payment calls get_latest_blockhash, so it requires a reachable
+        // Solana RPC endpoint. Skip-with-named-reason when it is unreachable
+        // instead of panicking (Requirement 6.5).
+        if let Err(reason) = probe_solana_rpc(RPC_URL).await {
+            eprintln!("SKIPPED: Solana RPC unavailable — {}", reason);
+            return;
+        }
+
         let sender_keypair = StealthKeyPair::generate_standard().unwrap();
         let receiver_keypair = StealthKeyPair::generate_standard().unwrap();
-        
-        let mut wallet = StealthWalletManager::new(sender_keypair, "https://api.devnet.solana.com");
+
+        let mut wallet = StealthWalletManager::new(sender_keypair, RPC_URL);
         let receiver_meta = receiver_keypair.to_meta_address();
         
         let prepared = wallet.prepare_payment(&receiver_meta, 1_000_000).unwrap();
@@ -695,9 +733,19 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_scan_incoming_empty_blockchain() {
         // Note: This test uses devnet which may have no stealth payments for our test wallet
-        
+
+        const RPC_URL: &str = "https://api.devnet.solana.com";
+
+        // scan_incoming queries the blockchain, so it requires a reachable
+        // Solana RPC endpoint. Skip-with-named-reason when it is unreachable
+        // instead of panicking (Requirement 6.5).
+        if let Err(reason) = probe_solana_rpc(RPC_URL).await {
+            eprintln!("SKIPPED: Solana RPC unavailable — {}", reason);
+            return;
+        }
+
         let keypair = StealthKeyPair::generate_standard().unwrap();
-        let mut wallet = StealthWalletManager::new(keypair, "https://api.devnet.solana.com");
+        let mut wallet = StealthWalletManager::new(keypair, RPC_URL);
         
         // Scan for incoming payments
         let result = wallet.scan_incoming().await;

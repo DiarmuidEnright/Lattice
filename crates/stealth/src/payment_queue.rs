@@ -14,7 +14,6 @@ use crate::wallet_manager::PreparedPayment;
 use serde::{Deserialize, Serialize};
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::{
-    commitment_config::CommitmentConfig,
     instruction::Instruction,
     pubkey::Pubkey,
     signature::{Keypair, Signature, Signer},
@@ -614,6 +613,7 @@ struct StoredQueue {
 mod tests {
     use super::*;
     use crate::storage::{InMemoryStorage, SecureStorage};
+    use solana_sdk::commitment_config::CommitmentConfig;
     use solana_sdk::pubkey::Pubkey;
     use std::sync::Arc;
     use tokio::sync::Mutex;

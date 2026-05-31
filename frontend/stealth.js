@@ -229,20 +229,14 @@ async function scanForPayments() {
     showLoading();
     
     try {
-        const response = await fetch(`${API_BASE_URL}/api/stealth/scan`, {
+        // Route through apiFetch for the uniform 10s timeout + error path (Req 2.8).
+        const data = await apiFetch('/api/stealth/scan', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 meta_address: stealthState.metaAddress
             })
         });
         
-        if (!response.ok) {
-            const error = await response.json();
-            throw new Error(error.error || 'Failed to scan for payments');
-        }
-        
-        const data = await response.json();
         stealthState.detectedPayments = data.data.payments || [];
         
         displayDetectedPayments(stealthState.detectedPayments);
@@ -537,13 +531,8 @@ async function refreshPaymentQueue() {
     showLoading();
     
     try {
-        const response = await fetch(`${API_BASE_URL}/api/stealth/queue`);
-        
-        if (!response.ok) {
-            throw new Error('Failed to load payment queue');
-        }
-        
-        const data = await response.json();
+        // Route through apiFetch for the uniform 10s timeout + error path (Req 2.8).
+        const data = await apiFetch('/api/stealth/queue');
         stealthState.queuedPayments = data.data.payments || [];
         
         displayPaymentQueue(stealthState.queuedPayments);
@@ -612,13 +601,8 @@ function displayPaymentQueue(payments) {
 
 async function checkMeshStatus() {
     try {
-        const response = await fetch(`${API_BASE_URL}/api/mesh/status`);
-        
-        if (!response.ok) {
-            throw new Error('Failed to check mesh status');
-        }
-        
-        const data = await response.json();
+        // Route through apiFetch for the uniform 10s timeout + error path (Req 2.8).
+        const data = await apiFetch('/api/mesh/status');
         stealthState.meshStatus = data.data;
         
         displayMeshStatus(stealthState.meshStatus);

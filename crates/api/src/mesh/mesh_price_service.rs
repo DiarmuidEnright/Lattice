@@ -138,8 +138,6 @@ pub struct MeshPriceService {
     message_tracker: Arc<MessageTracker>,
     /// Price cache for local storage
     price_cache: Arc<PriceCache>,
-    /// WebSocket service for client updates
-    websocket_service: Arc<WebSocketService>,
     /// Provider configuration
     provider_config: Arc<RwLock<ProviderConfig>>,
     /// Coordination service for multi-provider coordination
@@ -215,7 +213,6 @@ impl MeshPriceService {
             peer_manager,
             message_tracker,
             price_cache,
-            websocket_service,
             provider_config,
             coordination_service,
             network_status_tracker,

@@ -1,9 +1,8 @@
-use blockchain::{Blockchain, MultiChainClient};
+use blockchain::Blockchain;
 use chrono::{DateTime, Utc};
 use database::DbPool;
 use rust_decimal::Decimal;
 use shared::{Error, Result};
-use std::sync::Arc;
 use tracing::{debug, info};
 use uuid::Uuid;
 
@@ -53,17 +52,13 @@ pub struct TransactionFees {
 /// **Validates: Requirements 5.3, 5.4, 5.5, 5.6**
 pub struct CrossChainTransactionService {
     db: DbPool,
-    multi_chain_client: Arc<MultiChainClient>,
 }
 
 impl CrossChainTransactionService {
     /// Create a new cross-chain transaction service
-    pub fn new(db: DbPool, multi_chain_client: Arc<MultiChainClient>) -> Self {
+    pub fn new(db: DbPool) -> Self {
         info!("Initializing cross-chain transaction service");
-        Self {
-            db,
-            multi_chain_client,
-        }
+        Self { db }
     }
     
     /// Normalize a transaction from any blockchain into standard format

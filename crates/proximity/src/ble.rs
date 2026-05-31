@@ -24,8 +24,14 @@ const PROTOCOL_VERSION: u8 = 1;
 
 /// BLE Advertiser for broadcasting user presence via Bluetooth
 pub struct BleAdvertiser {
+    // justification: adapter handle and wallet_address are held for the
+    // platform-specific BLE advertising (peripheral mode) path documented in
+    // start_advertising; btleplug cannot advertise yet, so they are not read in
+    // this build. adapter is also obtained in new() to validate a BLE adapter exists.
+    #[allow(dead_code)]
     adapter: Adapter,
     user_tag: String,
+    #[allow(dead_code)]
     wallet_address: String,
     is_advertising: Arc<RwLock<bool>>,
 }
@@ -256,6 +262,7 @@ impl BleScanner {
             // Add new peer
             let peer = DiscoveredPeer {
                 peer_id: peer_id.clone(),
+                user_id: uuid::Uuid::nil(),
                 user_tag: user_tag.clone(),
                 wallet_address: String::new(), // Will be filled during authentication
                 discovery_method: DiscoveryMethod::Bluetooth,

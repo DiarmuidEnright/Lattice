@@ -53,7 +53,7 @@ yarn-error.log
 .DS_Store
 Thumbs.db
 
-# Kiro
+# Local agent/spec tooling
 .kiro/
 
 # Test coverage

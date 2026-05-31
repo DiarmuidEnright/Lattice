@@ -2,7 +2,6 @@ use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use deadpool_postgres::Pool;
 use rust_decimal::Decimal;
-use rust_decimal::prelude::{FromStr, ToPrimitive};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use uuid::Uuid;
@@ -503,15 +502,4 @@ pub enum ConversionStatus {
     Processing,
     Completed,
     Failed,
-}
-
-// Jupiter API response structures
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct JupiterQuoteResponse {
-    in_amount: u64,
-    out_amount: u64,
-    price_impact_pct: String,
-    #[serde(default)]
-    route_plan: Vec<serde_json::Value>,
 }

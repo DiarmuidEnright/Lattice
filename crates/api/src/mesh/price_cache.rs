@@ -210,7 +210,7 @@ impl PriceCache {
         
         let mut persisted_count = 0;
         
-        for (asset, data) in cache.iter() {
+        for (_asset, data) in cache.iter() {
             client
                 .execute(
                     "INSERT INTO mesh_price_cache 

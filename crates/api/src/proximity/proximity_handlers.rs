@@ -59,7 +59,11 @@ pub struct BlockPeerResponse {
 #[derive(Debug, Deserialize)]
 pub struct CreateTransferRequest {
     pub sender_user_id: Uuid,
-    pub sender_wallet: String,
+    /// Optional: when absent/null, the backend uses a configured default sender
+    /// wallet so a proximity transfer works even if the client hasn't connected
+    /// a wallet. Accepts null to avoid deserialize failures from the UI.
+    #[serde(default)]
+    pub sender_wallet: Option<String>,
     pub recipient_user_id: Uuid,
     pub recipient_wallet: String,
     pub asset: String,
@@ -227,19 +231,42 @@ pub async fn create_transfer(
     State(state): State<Arc<AppState>>,
     Json(req): Json<CreateTransferRequest>,
 ) -> ApiResult<Json<CreateTransferResponse>> {
+    // Resolve the sender wallet: use the one provided by the client, else fall
+    // back to the configured proximity wallet (PROXIMITY_WALLET) so a transfer
+    // works without a connected wallet on the client.
+    let sender_wallet = req
+        .sender_wallet
+        .filter(|w| !w.trim().is_empty())
+        .or_else(|| std::env::var("PROXIMITY_WALLET").ok())
+        .ok_or_else(|| ApiError::ValidationError("sender_wallet is required".to_string()))?;
+
     let transfer = state.proximity_transfer_service
         .create_transfer_request(
             req.sender_user_id,
-            req.sender_wallet,
+            sender_wallet,
             req.recipient_user_id,
             req.recipient_wallet,
             req.asset,
             req.amount,
         )
         .await
-        .map_err(|e| ApiError::InternalError(format!("Failed to create transfer: {}", e)))?;
+        .map_err(map_transfer_error)?;
     
     Ok(Json(CreateTransferResponse { transfer }))
+}
+
+/// Map a proximity transfer error to an API error. Validation-class failures
+/// (e.g. insufficient balance, invalid wallet) become a 400 with a clear,
+/// user-facing message so the UI can show the real reason instead of a generic
+/// "internal error".
+fn map_transfer_error(e: proximity::ProximityError) -> ApiError {
+    use proximity::error::ErrorCategory;
+    match e.category() {
+        ErrorCategory::Validation => ApiError::ValidationError(e.user_message()),
+        ErrorCategory::NotFound => ApiError::NotFound(e.user_message()),
+        ErrorCategory::Authentication => ApiError::Unauthorized(e.user_message()),
+        _ => ApiError::InternalError(format!("Failed to create transfer: {}", e)),
+    }
 }
 
 /// POST /api/proximity/transfers/{id}/accept - Accept transfer
@@ -249,16 +276,46 @@ pub async fn accept_transfer(
     State(state): State<Arc<AppState>>,
     Path(transfer_id): Path<Uuid>,
 ) -> ApiResult<Json<AcceptTransferResponse>> {
+    // Mark the request accepted, then settle it. If the blockchain is reachable
+    // the transfer is submitted on-chain immediately and we return the real tx
+    // hash. If offline, it is durably queued as PendingSettlement and the
+    // background sync task will submit it once connectivity returns.
     state.proximity_transfer_service
         .accept_transfer(transfer_id)
         .await
         .map_err(|e| ApiError::InternalError(format!("Failed to accept transfer: {}", e)))?;
-    
+
+    let tx_hash = state.proximity_transfer_service
+        .execute_or_queue_transfer(transfer_id)
+        .await
+        .map_err(|e| ApiError::InternalError(format!("Failed to settle transfer: {}", e)))?;
+
+    let message = if tx_hash.is_some() {
+        "Transfer accepted and settled on-chain".to_string()
+    } else {
+        "Transfer accepted and queued for settlement (offline); it will sync to the blockchain when connectivity returns".to_string()
+    };
+
     Ok(Json(AcceptTransferResponse {
         success: true,
-        message: "Transfer accepted and executed".to_string(),
-        transaction_hash: None, // Transaction hash would be retrieved from database after execution
+        message,
+        transaction_hash: tx_hash,
     }))
+}
+
+/// POST /api/proximity/transfers/sync - Settle any offline-queued transfers now
+pub async fn sync_pending_transfers(
+    State(state): State<Arc<AppState>>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let settled = state.proximity_transfer_service
+        .sync_pending_settlements()
+        .await
+        .map_err(|e| ApiError::InternalError(format!("Failed to sync pending transfers: {}", e)))?;
+
+    Ok(Json(serde_json::json!({
+        "success": true,
+        "settled": settled,
+    })))
 }
 
 /// POST /api/proximity/transfers/{id}/reject - Reject transfer

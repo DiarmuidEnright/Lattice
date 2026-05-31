@@ -2,7 +2,7 @@
 
 use crate::error::{StealthError, StealthResult};
 use qrcode::QrCode;
-use image::{DynamicImage, ImageBuffer, Luma};
+use image::{DynamicImage, Luma};
 
 /// QR code utilities for meta-addresses
 pub struct QrCodeHandler;
@@ -75,6 +75,7 @@ impl QrCodeHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use image::ImageBuffer;
 
     #[test]
     fn test_encode_valid_meta_address() {

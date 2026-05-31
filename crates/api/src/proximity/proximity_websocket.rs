@@ -12,7 +12,6 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::broadcast;
 use tracing::{error, info, warn};
-use uuid::Uuid;
 
 use crate::AppState;
 
@@ -284,7 +283,7 @@ pub async fn proximity_websocket_handler(
 }
 
 /// Handle individual WebSocket connection for proximity events
-async fn handle_proximity_socket(socket: WebSocket, state: Arc<AppState>) {
+async fn handle_proximity_socket(socket: WebSocket, _state: Arc<AppState>) {
     let (mut sender, mut receiver) = socket.split();
 
     // Note: In production, proximity_websocket_service would be part of AppState
@@ -323,7 +322,7 @@ async fn handle_proximity_socket(socket: WebSocket, state: Arc<AppState>) {
                     info!("Proximity WebSocket client closed connection");
                     break;
                 }
-                Message::Ping(data) => {
+                Message::Ping(_data) => {
                     info!("Received ping from proximity WebSocket client");
                 }
                 Message::Pong(_) => {

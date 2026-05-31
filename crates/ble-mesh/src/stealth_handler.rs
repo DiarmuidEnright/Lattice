@@ -242,43 +242,6 @@ impl BLEMeshHandler {
         debug!("Encrypted {} bytes to {} bytes", data.len(), result.len());
         Ok(result)
     }
-
-    /// Decrypt received payment request
-    /// 
-    /// Extracts the nonce from the payload and decrypts using XChaCha20-Poly1305.
-    /// 
-    /// # Arguments
-    /// * `ciphertext` - The encrypted payload (nonce + ciphertext)
-    /// * `shared_key` - The 32-byte shared secret from ECDH
-    /// 
-    /// # Requirements
-    /// Validates: Requirements 8.3
-    /// 
-    /// # Returns
-    /// Decrypted plaintext data
-    fn decrypt_payment_request(&self, ciphertext: &[u8], shared_key: &[u8; 32]) -> MeshResult<Vec<u8>> {
-        // Extract nonce (first 24 bytes)
-        if ciphertext.len() < 24 {
-            return Err(MeshError::DecryptionFailed(
-                "Ciphertext too short to contain nonce".to_string(),
-            ));
-        }
-
-        let nonce: [u8; 24] = ciphertext[..24]
-            .try_into()
-            .map_err(|e| MeshError::DecryptionFailed(format!("Invalid nonce: {:?}", e)))?;
-        let encrypted_data = &ciphertext[24..];
-
-        // Decrypt using StealthCrypto
-        let plaintext = StealthCrypto::decrypt_mesh_payload(encrypted_data, shared_key, &nonce)
-            .map_err(|e| {
-                error!("Decryption failed: {}", e);
-                MeshError::DecryptionFailed(e.to_string())
-            })?;
-
-        debug!("Decrypted {} bytes to {} bytes", ciphertext.len(), plaintext.len());
-        Ok(plaintext)
-    }
 }
 
 /// Mesh payment request payload

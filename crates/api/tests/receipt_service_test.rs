@@ -3,25 +3,43 @@ use blockchain::{Blockchain, MultiChainClient};
 use database::{create_pool, run_migrations};
 use rust_decimal::Decimal;
 use std::sync::Arc;
+use std::time::Duration;
 use uuid::Uuid;
 
-/// Helper to create a test database pool
-async fn setup_test_db() -> database::DbPool {
+/// Helper to create a test database pool, probing PostgreSQL with a short
+/// connect timeout.
+///
+/// Returns `Err` (with a human-readable reason) when the dependency is
+/// unreachable so callers can skip-with-named-reason rather than fail
+/// (Requirement 6.5: skipped distinct from failed for unreachable dependencies).
+async fn setup_test_db() -> Result<database::DbPool, String> {
     let database_url = std::env::var("DATABASE_URL")
         .unwrap_or_else(|_| "postgresql://postgres:password@localhost:5432/whale_tracker_test".to_string());
-    
-    let pool = create_pool(&database_url, 5).await.expect("Failed to create pool");
-    
+
+    let pool = create_pool(&database_url, 5)
+        .await
+        .map_err(|e| format!("failed to create pool: {}", e))?;
+
+    // Probe the dependency: a deadpool `get()` establishes a real connection,
+    // surfacing auth/connectivity errors (e.g. role missing). Bound it with a
+    // short timeout so an unreachable host does not hang the suite.
+    match tokio::time::timeout(Duration::from_secs(3), pool.get()).await {
+        Ok(Ok(_client)) => {}
+        Ok(Err(e)) => return Err(format!("connection failed: {}", e)),
+        Err(_) => return Err("connection timed out after 3s".to_string()),
+    }
+
     // Try to run migrations, but ignore if tables already exist
     let _ = run_migrations(&pool).await;
-    
-    pool
+
+    Ok(pool)
 }
 
-/// Helper to create a test receipt service
-async fn create_test_service() -> ReceiptService {
-    let db = setup_test_db().await;
-    
+/// Helper to create a test receipt service. Returns `Err` with a named reason
+/// when PostgreSQL is unreachable.
+async fn create_test_service() -> Result<ReceiptService, String> {
+    let db = setup_test_db().await?;
+
     // Create a multi-chain client with test configuration
     let blockchain_client = Arc::new(
         MultiChainClient::new()
@@ -30,12 +48,40 @@ async fn create_test_service() -> ReceiptService {
             .with_polygon("https://polygon-rpc.com".to_string(), None),
     );
 
-    ReceiptService::new(db, blockchain_client)
+    Ok(ReceiptService::new(db, blockchain_client))
+}
+
+/// Build a receipt service or skip the current test with a named reason when
+/// PostgreSQL is unreachable. Expands to an early `return` on the skip path.
+macro_rules! service_or_skip {
+    () => {
+        match create_test_service().await {
+            Ok(service) => service,
+            Err(reason) => {
+                eprintln!("SKIPPED: PostgreSQL unavailable — {}", reason);
+                return;
+            }
+        }
+    };
+}
+
+/// Acquire a pool or skip the current test with a named reason when PostgreSQL
+/// is unreachable. Expands to an early `return` on the skip path.
+macro_rules! pool_or_skip {
+    () => {
+        match setup_test_db().await {
+            Ok(pool) => pool,
+            Err(reason) => {
+                eprintln!("SKIPPED: PostgreSQL unavailable — {}", reason);
+                return;
+            }
+        }
+    };
 }
 
 #[tokio::test]
 async fn test_create_receipt_for_payment() {
-    let service = create_test_service().await;
+    let service = service_or_skip!();
 
     let payment_id = Uuid::new_v4();
     let data = ReceiptData {
@@ -66,7 +112,7 @@ async fn test_create_receipt_for_payment() {
 
 #[tokio::test]
 async fn test_create_receipt_for_trade() {
-    let service = create_test_service().await;
+    let service = service_or_skip!();
 
     let trade_id = Uuid::new_v4();
     let data = ReceiptData {
@@ -92,13 +138,13 @@ async fn test_create_receipt_for_trade() {
 
 #[tokio::test]
 async fn test_create_receipt_for_conversion() {
-    let service = create_test_service().await;
+    let service = service_or_skip!();
 
     // First create a user and conversion in the database
     let user_id = Uuid::new_v4();
     let conversion_id = Uuid::new_v4();
     
-    let db = setup_test_db().await;
+    let db = pool_or_skip!();
     let client = db.get().await.expect("Failed to get client");
     
     // Create user
@@ -143,7 +189,7 @@ async fn test_create_receipt_for_conversion() {
 
 #[tokio::test]
 async fn test_get_receipt_by_id() {
-    let service = create_test_service().await;
+    let service = service_or_skip!();
 
     // Create a receipt first
     let payment_id = Uuid::new_v4();
@@ -174,7 +220,7 @@ async fn test_get_receipt_by_id() {
 
 #[tokio::test]
 async fn test_get_receipt_by_payment_id() {
-    let service = create_test_service().await;
+    let service = service_or_skip!();
 
     let payment_id = Uuid::new_v4();
     let data = ReceiptData {
@@ -206,7 +252,7 @@ async fn test_get_receipt_by_payment_id() {
 
 #[tokio::test]
 async fn test_get_receipt_by_trade_id() {
-    let service = create_test_service().await;
+    let service = service_or_skip!();
 
     let trade_id = Uuid::new_v4();
     let data = ReceiptData {
@@ -238,13 +284,13 @@ async fn test_get_receipt_by_trade_id() {
 
 #[tokio::test]
 async fn test_get_receipt_by_conversion_id() {
-    let service = create_test_service().await;
+    let service = service_or_skip!();
 
     // First create a user and conversion in the database
     let user_id = Uuid::new_v4();
     let conversion_id = Uuid::new_v4();
     
-    let db = setup_test_db().await;
+    let db = pool_or_skip!();
     let client = db.get().await.expect("Failed to get client");
     
     // Create user
@@ -296,7 +342,7 @@ async fn test_get_receipt_by_conversion_id() {
 
 #[tokio::test]
 async fn test_get_nonexistent_receipt() {
-    let service = create_test_service().await;
+    let service = service_or_skip!();
 
     let nonexistent_id = Uuid::new_v4();
     let result = service.get_receipt(nonexistent_id).await;
@@ -305,7 +351,7 @@ async fn test_get_nonexistent_receipt() {
 
 #[tokio::test]
 async fn test_receipt_has_transaction_hash() {
-    let service = create_test_service().await;
+    let service = service_or_skip!();
 
     let data = ReceiptData {
         payment_id: Some(Uuid::new_v4()),
@@ -329,7 +375,7 @@ async fn test_receipt_has_transaction_hash() {
 
 #[tokio::test]
 async fn test_receipt_links_to_source_transaction() {
-    let service = create_test_service().await;
+    let service = service_or_skip!();
 
     let payment_id = Uuid::new_v4();
     let data = ReceiptData {
@@ -354,7 +400,7 @@ async fn test_receipt_links_to_source_transaction() {
 
 #[tokio::test]
 async fn test_receipt_stored_in_database() {
-    let service = create_test_service().await;
+    let service = service_or_skip!();
 
     let payment_id = Uuid::new_v4();
     let data = ReceiptData {
@@ -387,7 +433,7 @@ async fn test_receipt_stored_in_database() {
 
 #[tokio::test]
 async fn test_multiple_receipts_for_different_blockchains() {
-    let service = create_test_service().await;
+    let service = service_or_skip!();
 
     // Create receipt on Ethereum
     let eth_data = ReceiptData {
@@ -446,7 +492,7 @@ async fn test_multiple_receipts_for_different_blockchains() {
 
 #[tokio::test]
 async fn test_verify_receipt_success() {
-    let service = create_test_service().await;
+    let service = service_or_skip!();
 
     // Create a receipt
     let data = ReceiptData {
@@ -476,7 +522,7 @@ async fn test_verify_receipt_success() {
 
 #[tokio::test]
 async fn test_verify_receipt_already_confirmed() {
-    let service = create_test_service().await;
+    let service = service_or_skip!();
 
     // Create and verify a receipt
     let data = ReceiptData {
@@ -506,7 +552,7 @@ async fn test_verify_receipt_already_confirmed() {
 
 #[tokio::test]
 async fn test_verify_receipt_for_solana() {
-    let service = create_test_service().await;
+    let service = service_or_skip!();
 
     // Create a Solana receipt
     let data = ReceiptData {
@@ -534,7 +580,7 @@ async fn test_verify_receipt_for_solana() {
 
 #[tokio::test]
 async fn test_verify_receipt_for_polygon() {
-    let service = create_test_service().await;
+    let service = service_or_skip!();
 
     // Create a Polygon receipt
     let data = ReceiptData {
@@ -562,7 +608,7 @@ async fn test_verify_receipt_for_polygon() {
 
 #[tokio::test]
 async fn test_verify_nonexistent_receipt() {
-    let service = create_test_service().await;
+    let service = service_or_skip!();
 
     let nonexistent_id = Uuid::new_v4();
     let result = service.verify_receipt(nonexistent_id).await;
@@ -571,7 +617,7 @@ async fn test_verify_nonexistent_receipt() {
 
 #[tokio::test]
 async fn test_verify_receipt_updates_database() {
-    let service = create_test_service().await;
+    let service = service_or_skip!();
 
     // Create a receipt
     let data = ReceiptData {
@@ -599,7 +645,7 @@ async fn test_verify_receipt_updates_database() {
 
 #[tokio::test]
 async fn test_verify_receipt_returns_verification_status() {
-    let service = create_test_service().await;
+    let service = service_or_skip!();
 
     // Create a receipt
     let data = ReceiptData {

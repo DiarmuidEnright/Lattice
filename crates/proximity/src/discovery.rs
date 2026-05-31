@@ -19,6 +19,7 @@ pub struct DiscoveryService {
     mdns_announcer: Arc<RwLock<Option<MdnsAnnouncer>>>,
     mdns_listener: Arc<RwLock<Option<MdnsListener>>>,
     // BLE components will be added in Task 4
+    user_id: String,
     user_tag: String,
     device_id: String,
     wallet_address: String,
@@ -27,12 +28,32 @@ pub struct DiscoveryService {
 
 impl DiscoveryService {
     pub fn new(user_tag: String, device_id: String, wallet_address: String) -> Self {
+        // Back-compat constructor: no explicit user_id (uses nil). Prefer
+        // `with_identity` so peers can be targeted for transfers by real UUID.
+        Self::with_identity(
+            uuid::Uuid::nil().to_string(),
+            user_tag,
+            device_id,
+            wallet_address,
+        )
+    }
+
+    /// Construct a discovery service with an explicit user account id (UUID as
+    /// string) that is broadcast so discovered peers can be used as transfer
+    /// recipients.
+    pub fn with_identity(
+        user_id: String,
+        user_tag: String,
+        device_id: String,
+        wallet_address: String,
+    ) -> Self {
         Self {
             discovered_peers: Arc::new(RwLock::new(HashMap::new())),
             active_method: Arc::new(RwLock::new(None)),
             shutdown_notify: Arc::new(Notify::new()),
             mdns_announcer: Arc::new(RwLock::new(None)),
             mdns_listener: Arc::new(RwLock::new(None)),
+            user_id,
             user_tag,
             device_id,
             wallet_address,
@@ -214,6 +235,7 @@ impl DiscoveryService {
 
         // Create and start mDNS announcer
         let announcer = MdnsAnnouncer::new(
+            self.user_id.clone(),
             self.user_tag.clone(),
             self.device_id.clone(),
             self.wallet_address.clone(),
@@ -227,9 +249,18 @@ impl DiscoveryService {
         // Create and start mDNS listener
         let listener = MdnsListener::new()?;
         
-        // Set up callback to add discovered peers
+        // Set up callback to add discovered peers. Exclude our own announcement
+        // (same device_id): mDNS browse echoes back the service this node itself
+        // registered, and listing ourselves as a peer would be confusing in a
+        // multi-device demo. We only record peers whose device_id differs from
+        // ours.
         let discovered_peers = Arc::clone(&self.discovered_peers);
+        let own_device_id = self.device_id.clone();
         listener.start(move |peer| {
+            if peer.peer_id == own_device_id {
+                debug!("Ignoring self-announcement for device {}", own_device_id);
+                return;
+            }
             let peers = Arc::clone(&discovered_peers);
             tokio::spawn(async move {
                 let mut peer_map = peers.write().await;
@@ -270,6 +301,8 @@ impl DiscoveryService {
         let peers = Arc::clone(&self.discovered_peers);
         let active_method = Arc::clone(&self.active_method);
         let shutdown = Arc::clone(&self.shutdown_notify);
+        let listener_handle = Arc::clone(&self.mdns_listener);
+        let own_device_id = self.device_id.clone();
         
         tokio::spawn(async move {
             let mut refresh_interval = interval(TokioDuration::from_secs(PEER_REFRESH_INTERVAL_SECS));
@@ -283,12 +316,41 @@ impl DiscoveryService {
                             debug!("Discovery inactive, stopping refresh task");
                             break;
                         }
-                        
-                        // Refresh peer list
+
+                        // Re-sync from the mDNS listener's live peer set before
+                        // reaping. mDNS `ServiceResolved` fires once on initial
+                        // discovery, so the one-shot callback can't keep
+                        // `last_seen` fresh; without this re-sync a peer that is
+                        // still on the network would be evicted after
+                        // PEER_TIMEOUT_SECS. The listener maintains an
+                        // authoritative set (updated on resolve and pruned on
+                        // `ServiceRemoved`), so we refresh `last_seen` for every
+                        // peer it still reports as present (excluding ourselves).
                         let now = Utc::now();
+                        {
+                            let listener_guard = listener_handle.read().await;
+                            if let Some(listener) = listener_guard.as_ref() {
+                                let live_peers = listener.get_discovered_peers().await;
+                                let mut peer_map = peers.write().await;
+                                for mut live in live_peers {
+                                    if live.peer_id == own_device_id {
+                                        continue;
+                                    }
+                                    live.last_seen = now;
+                                    peer_map
+                                        .entry(live.peer_id.clone())
+                                        .and_modify(|p| p.last_seen = now)
+                                        .or_insert(live);
+                                }
+                            }
+                        }
+
+                        // Reap peers the listener no longer reports (left the
+                        // network) after the staleness window.
                         let timeout_threshold = now - Duration::seconds(PEER_TIMEOUT_SECS);
                         
                         let mut peer_map = peers.write().await;
+
                         let initial_count = peer_map.len();
                         
                         peer_map.retain(|peer_id, peer| {
@@ -388,6 +450,7 @@ mod tests {
         
         let peer = DiscoveredPeer {
             peer_id: "peer1".to_string(),
+            user_id: uuid::Uuid::nil(),
             user_tag: "Alice".to_string(),
             wallet_address: "wallet123".to_string(),
             discovery_method: DiscoveryMethod::WiFi,
@@ -415,6 +478,7 @@ mod tests {
         
         let peer1 = DiscoveredPeer {
             peer_id: "peer1".to_string(),
+            user_id: uuid::Uuid::nil(),
             user_tag: "Alice".to_string(),
             wallet_address: "wallet123".to_string(),
             discovery_method: DiscoveryMethod::WiFi,
@@ -429,6 +493,7 @@ mod tests {
         // Update with new signal strength
         let peer2 = DiscoveredPeer {
             peer_id: "peer1".to_string(),
+            user_id: uuid::Uuid::nil(),
             user_tag: "Alice".to_string(),
             wallet_address: "wallet123".to_string(),
             discovery_method: DiscoveryMethod::WiFi,
@@ -455,6 +520,7 @@ mod tests {
         
         let peer = DiscoveredPeer {
             peer_id: "peer1".to_string(),
+            user_id: uuid::Uuid::nil(),
             user_tag: "Alice".to_string(),
             wallet_address: "wallet123".to_string(),
             discovery_method: DiscoveryMethod::WiFi,
@@ -495,6 +561,7 @@ mod tests {
         // Add a peer with old last_seen timestamp
         let old_peer = DiscoveredPeer {
             peer_id: "old_peer".to_string(),
+            user_id: uuid::Uuid::nil(),
             user_tag: "Old".to_string(),
             wallet_address: "wallet1".to_string(),
             discovery_method: DiscoveryMethod::WiFi,
@@ -507,6 +574,7 @@ mod tests {
         // Add a peer with recent last_seen timestamp
         let recent_peer = DiscoveredPeer {
             peer_id: "recent_peer".to_string(),
+            user_id: uuid::Uuid::nil(),
             user_tag: "Recent".to_string(),
             wallet_address: "wallet2".to_string(),
             discovery_method: DiscoveryMethod::WiFi,
@@ -539,6 +607,7 @@ mod tests {
         
         let peer = DiscoveredPeer {
             peer_id: "peer1".to_string(),
+            user_id: uuid::Uuid::nil(),
             user_tag: "Alice".to_string(),
             wallet_address: "wallet123".to_string(),
             discovery_method: DiscoveryMethod::WiFi,
@@ -570,6 +639,7 @@ mod tests {
         // Add a peer with old timestamp
         let old_peer = DiscoveredPeer {
             peer_id: "old_peer".to_string(),
+            user_id: uuid::Uuid::nil(),
             user_tag: "Old".to_string(),
             wallet_address: "wallet1".to_string(),
             discovery_method: DiscoveryMethod::WiFi,
@@ -580,14 +650,26 @@ mod tests {
         };
         
         service.add_or_update_peer(old_peer).await.unwrap();
-        assert_eq!(service.get_discovered_peers().await.unwrap().len(), 1);
+        assert!(service
+            .get_discovered_peers()
+            .await
+            .unwrap()
+            .iter()
+            .any(|p| p.peer_id == "old_peer"));
         
         // Wait for refresh task to run (5 second interval + buffer)
         sleep(TokioDuration::from_secs(6)).await;
         
-        // Old peer should be removed by background task
+        // The stale `old_peer` (not present on the live network) must be removed
+        // by the background task. We assert specifically on that peer rather than
+        // on an empty list, because the refresh task also re-syncs any *real*
+        // mDNS peers present on the host's network into the list, which would
+        // otherwise make this assertion environment-dependent and flaky.
         let peers = service.get_discovered_peers().await.unwrap();
-        assert_eq!(peers.len(), 0);
+        assert!(
+            !peers.iter().any(|p| p.peer_id == "old_peer"),
+            "stale peer should have been removed by the refresh task"
+        );
         
         service.stop_discovery().await.unwrap();
     }
@@ -606,6 +688,7 @@ mod tests {
         for i in 0..50 {
             let peer = DiscoveredPeer {
                 peer_id: format!("peer{}", i),
+                user_id: uuid::Uuid::nil(),
                 user_tag: format!("User{}", i),
                 wallet_address: format!("wallet{}", i),
                 discovery_method: DiscoveryMethod::WiFi,
@@ -622,6 +705,7 @@ mod tests {
         // Try to add a peer with stronger signal than the weakest
         let strong_peer = DiscoveredPeer {
             peer_id: "strong_peer".to_string(),
+            user_id: uuid::Uuid::nil(),
             user_tag: "Strong".to_string(),
             wallet_address: "wallet_strong".to_string(),
             discovery_method: DiscoveryMethod::WiFi,
@@ -656,6 +740,7 @@ mod tests {
         for i in 0..50 {
             let peer = DiscoveredPeer {
                 peer_id: format!("peer{}", i),
+                user_id: uuid::Uuid::nil(),
                 user_tag: format!("User{}", i),
                 wallet_address: format!("wallet{}", i),
                 discovery_method: DiscoveryMethod::WiFi,
@@ -670,6 +755,7 @@ mod tests {
         // Try to add a peer with weaker signal than all existing peers
         let weak_peer = DiscoveredPeer {
             peer_id: "weak_peer".to_string(),
+            user_id: uuid::Uuid::nil(),
             user_tag: "Weak".to_string(),
             wallet_address: "wallet_weak".to_string(),
             discovery_method: DiscoveryMethod::WiFi,
@@ -701,6 +787,7 @@ mod tests {
         for i in 0..50 {
             let peer = DiscoveredPeer {
                 peer_id: format!("peer{}", i),
+                user_id: uuid::Uuid::nil(),
                 user_tag: format!("User{}", i),
                 wallet_address: format!("wallet{}", i),
                 discovery_method: DiscoveryMethod::WiFi,
@@ -715,6 +802,7 @@ mod tests {
         // Try to add a peer with signal strength
         let peer_with_signal = DiscoveredPeer {
             peer_id: "peer_with_signal".to_string(),
+            user_id: uuid::Uuid::nil(),
             user_tag: "WithSignal".to_string(),
             wallet_address: "wallet_signal".to_string(),
             discovery_method: DiscoveryMethod::WiFi,

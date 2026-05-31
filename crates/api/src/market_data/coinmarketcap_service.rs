@@ -6,12 +6,11 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
-use tracing::{error, warn};
+use tracing::warn;
 
 use crate::error::{ApiError, ApiResult};
 
 const CMC_API_BASE: &str = "https://pro-api.coinmarketcap.com/v1";
-const CMC_API_BASE_V2: &str = "https://pro-api.coinmarketcap.com/v2";
 const CACHE_TTL_SECONDS: u64 = 60;
 
 /// CoinMarketCap API response structures
@@ -23,6 +22,9 @@ struct CmcResponse<T> {
 
 #[derive(Debug, Deserialize)]
 struct CmcStatus {
+    // Parsed from the CoinMarketCap response to document its shape; not read by
+    // our logic (serde would ignore it if dropped, but it is kept for clarity).
+    #[allow(dead_code)]
     timestamp: String,
     error_code: i32,
     error_message: Option<String>,
@@ -40,14 +42,21 @@ struct CmcUsdQuote {
     volume_24h: Option<f64>,
     percent_change_24h: Option<f64>,
     market_cap: Option<f64>,
+    // Parsed from the CoinMarketCap USD quote to document its shape; our code
+    // stamps its own Utc::now() timestamp instead of reading this field.
+    #[allow(dead_code)]
     last_updated: String,
 }
 
 #[derive(Debug, Deserialize)]
 struct CmcCryptocurrency {
+    // `id` and `slug` are part of the CoinMarketCap cryptocurrency object and are
+    // parsed to document its shape; only `name`, `symbol`, and `quote` are read.
+    #[allow(dead_code)]
     id: i64,
     name: String,
     symbol: String,
+    #[allow(dead_code)]
     slug: String,
     quote: CmcQuote,
 }
@@ -55,6 +64,9 @@ struct CmcCryptocurrency {
 #[derive(Debug, Deserialize)]
 struct CmcConversionResponse {
     amount: f64,
+    // Parsed from the CoinMarketCap conversion response to document its shape;
+    // our code stamps its own Utc::now() timestamp instead of reading this field.
+    #[allow(dead_code)]
     last_updated: String,
     quote: HashMap<String, CmcConversionQuote>,
 }

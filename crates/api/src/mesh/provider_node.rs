@@ -325,9 +325,10 @@ impl ProviderNode {
         Ok(prices)
     }
 
-    /// Create a price update message with unique ID
+    /// Create a price update message with unique ID (static version)
     /// 
     /// # Arguments
+    /// * `node_id` - Source node identifier
     /// * `prices` - Map of asset symbols to price data
     /// 
     /// # Returns
@@ -337,11 +338,6 @@ impl ProviderNode {
     /// - Current timestamp
     /// - Price data
     /// - TTL of 10
-    fn create_price_update(&self, prices: HashMap<String, PriceData>) -> PriceUpdate {
-        Self::create_price_update_static(self.node_id, prices)
-    }
-
-    /// Create a price update message (static version)
     fn create_price_update_static(node_id: Uuid, prices: HashMap<String, PriceData>) -> PriceUpdate {
         PriceUpdate {
             message_id: Uuid::new_v4(),
@@ -352,23 +348,19 @@ impl ProviderNode {
         }
     }
 
-    /// Broadcast price update to all connected peers
+    /// Broadcast price update to all connected peers (static version)
     /// 
     /// Sends the price update message to all currently connected peers.
     /// Failures to individual peers are logged but don't prevent broadcasting
     /// to other peers.
     /// 
     /// # Arguments
+    /// * `peer_manager` - Manager used to send messages to peers
     /// * `update` - The price update message to broadcast
     /// 
     /// # Returns
     /// * `Ok(())` - Broadcast completed (may have partial failures)
     /// * `Err(_)` - Critical error occurred
-    async fn broadcast_update(&self, update: PriceUpdate) -> Result<()> {
-        Self::broadcast_update_static(&self.peer_manager, update).await
-    }
-
-    /// Broadcast price update to all connected peers (static version)
     async fn broadcast_update_static(
         peer_manager: &Arc<PeerConnectionManager>,
         update: PriceUpdate,

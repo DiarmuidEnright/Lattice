@@ -35,7 +35,6 @@ use dashmap::DashMap;
 use std::sync::Arc;
 use tokio::sync::{mpsc, RwLock};
 use tracing::{debug, error, info, warn};
-use uuid::Uuid;
 
 /// BLE MTU limit for fragmentation
 const BLE_MTU: usize = 512;
@@ -58,6 +57,10 @@ pub struct BLEAdapterImpl {
     rx_channel: Arc<RwLock<Option<mpsc::Receiver<Vec<u8>>>>>,
     
     /// Channel sender for incoming data
+    // justification: retained to keep the mpsc channel open for receive_data; the
+    // peripheral notification path that clones this sender is platform-specific and
+    // not yet wired, so the field is currently written but not read.
+    #[allow(dead_code)]
     tx_channel: Arc<mpsc::Sender<Vec<u8>>>,
     
     /// Flag indicating if advertising is active
@@ -353,6 +356,7 @@ impl BLEAdapter for BLEAdapterImpl {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use uuid::Uuid;
 
     #[tokio::test]
     async fn test_ble_adapter_creation() {

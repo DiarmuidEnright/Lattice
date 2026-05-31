@@ -15,8 +15,122 @@ const state = {
     currentQuote: null,
     quoteExpiryTimer: null,
     conversionMode: 'exactInput', // 'exactInput' or 'exactOutput'
-    selectedBlockchain: 'all' // For portfolio filtering
+    selectedBlockchain: 'all', // For portfolio filtering
+    // Backend reachability, maintained by checkHealthStatus(). Starts null
+    // (unknown) until the first /health probe resolves. When false, data
+    // loaders are permitted to render placeholder/mock data together with a
+    // persistent "data not live" banner (Requirement 2.5). When true, a failed
+    // per-request load surfaces a visible error and NEVER substitutes mock
+    // data (Requirements 2.3, 2.4, 2.7).
+    backendReachable: null
 };
+
+// Centralized API request timeout (milliseconds)
+const API_TIMEOUT_MS = 10000;
+
+/**
+ * Centralized backend fetch helper.
+ *
+ * All backend calls should route through this helper so that timeouts,
+ * network errors, and non-OK HTTP responses are handled uniformly.
+ *
+ * Behavior:
+ * - URL: if `path` starts with "http" it is used as-is; otherwise it is
+ *   prefixed with `API_BASE_URL` (a single leading slash is normalized so
+ *   callers may pass either "api/..." or "/api/...").
+ * - Timeout: the request is aborted after 10 seconds via an AbortController.
+ * - Options: caller `options` (method, headers, body) are merged. When a body
+ *   is present and the caller did not set a `Content-Type`, it defaults to
+ *   `application/json` (callers may override).
+ * - Success: returns the parsed JSON body. A `204 No Content` (or empty body)
+ *   resolves to `null`.
+ * - Failure: THROWS a normalized Error in all failure cases, so callers must
+ *   use try/catch:
+ *     - timeout/abort  -> `Request to <path> timed out after 10s`
+ *     - network error  -> message identifying the failed request/path
+ *     - non-OK status   -> message including the HTTP status and, when present,
+ *                          the parsed error message from the JSON body
+ *                          (`{ error }` or `{ message }`), identifying the path
+ *
+ * @param {string} path - Backend path (e.g. "/api/...") or a full URL.
+ * @param {RequestInit} [options] - Standard fetch options (method, headers, body).
+ * @returns {Promise<any>} The parsed JSON response body, or null when empty.
+ * @throws {Error} On timeout, network error, or non-OK HTTP status.
+ */
+async function apiFetch(path, options = {}) {
+    // Build the full URL. Accept both full URLs and relative paths, and
+    // normalize the join so a missing/extra leading slash does not matter.
+    let url;
+    if (typeof path === 'string' && /^https?:\/\//i.test(path)) {
+        url = path;
+    } else {
+        const base = API_BASE_URL.replace(/\/+$/, '');
+        const suffix = String(path == null ? '' : path).replace(/^\/+/, '');
+        url = `${base}/${suffix}`;
+    }
+
+    // 10-second timeout via AbortController.
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
+
+    // Merge caller options and default the JSON content type when a body is
+    // present and the caller did not provide their own headers override.
+    const headers = { ...(options.headers || {}) };
+    if (options.body !== undefined && options.body !== null) {
+        const hasContentType = Object.keys(headers).some(
+            (h) => h.toLowerCase() === 'content-type'
+        );
+        if (!hasContentType) {
+            headers['Content-Type'] = 'application/json';
+        }
+    }
+
+    let response;
+    try {
+        response = await fetch(url, {
+            ...options,
+            headers,
+            signal: controller.signal
+        });
+    } catch (error) {
+        // AbortError indicates the 10-second timeout fired; surface a distinct
+        // message so callers/UI can identify the timed-out operation (Req 2.8).
+        if (error && error.name === 'AbortError') {
+            throw new Error(`Request to ${path} timed out after 10s`);
+        }
+        // Any other fetch rejection is a network-level failure (Req 2.7).
+        throw new Error(`Network error while requesting ${path}: ${error.message}`);
+    } finally {
+        clearTimeout(timeoutId);
+    }
+
+    // Parse the body defensively so a non-JSON payload does not throw an
+    // opaque error; treat an empty/non-JSON body as no data.
+    let data = null;
+    const rawBody = await response.text().catch(() => '');
+    if (rawBody) {
+        try {
+            data = JSON.parse(rawBody);
+        } catch (parseError) {
+            data = null;
+        }
+    }
+
+    // Non-OK HTTP status -> normalized error identifying the path and status,
+    // including a parsed backend error message when one is available (Req 2.7).
+    if (!response.ok) {
+        let detail = '';
+        if (data && typeof data === 'object') {
+            detail = data.error || data.message || '';
+        } else if (rawBody) {
+            detail = rawBody;
+        }
+        const suffix = detail ? `: ${detail}` : '';
+        throw new Error(`Request to ${path} failed (HTTP ${response.status})${suffix}`);
+    }
+
+    return data;
+}
 
 // Initialize App
 document.addEventListener('DOMContentLoaded', () => {
@@ -141,11 +255,59 @@ async function checkHealthStatus() {
             indicator.className = 'status-indicator unhealthy';
             statusText.textContent = 'Service Issues Detected';
         }
+        // A resolved /health response (even "unhealthy") means the backend
+        // process is reachable, so per-request failures must surface real
+        // errors rather than mock data (Requirements 2.3, 2.4, 2.7).
+        setBackendReachable(true);
     } catch (error) {
         const indicator = document.querySelector('.status-indicator');
         const statusText = document.querySelector('.status-text');
         indicator.className = 'status-indicator unhealthy';
         statusText.textContent = 'API Unavailable';
+        // The backend could not be reached. Placeholder/mock data is now
+        // permitted, but only alongside a persistent "data not live" banner
+        // (Requirement 2.5).
+        setBackendReachable(false);
+    }
+}
+
+/**
+ * Update the cached backend reachability flag and toggle the persistent
+ * "data not live" banner accordingly.
+ *
+ * The banner is shown whenever the backend is unreachable and hidden once
+ * reachability is restored, so the indicator stays in sync with the live
+ * state across the 30-second health poll.
+ *
+ * @param {boolean} reachable - Whether the latest /health probe succeeded.
+ */
+function setBackendReachable(reachable) {
+    state.backendReachable = reachable;
+    if (reachable) {
+        hideDataNotLiveBanner();
+    } else {
+        showDataNotLiveBanner();
+    }
+}
+
+/**
+ * Show the persistent, visible "data not live" banner. Sanctioned only for
+ * the backend-unreachable-at-open case (Requirement 2.5).
+ */
+function showDataNotLiveBanner() {
+    const banner = document.getElementById('dataNotLiveBanner');
+    if (banner) {
+        banner.classList.remove('hidden');
+    }
+}
+
+/**
+ * Hide the "data not live" banner once the backend is reachable again.
+ */
+function hideDataNotLiveBanner() {
+    const banner = document.getElementById('dataNotLiveBanner');
+    if (banner) {
+        banner.classList.add('hidden');
     }
 }
 
@@ -202,14 +364,10 @@ async function connectWallet() {
 
 async function loadPortfolio(walletAddress) {
     try {
-        const response = await fetch(`${API_BASE_URL}/api/wallets/${walletAddress}/multi-chain-portfolio`);
-        
-        if (!response.ok) {
-            const errorData = await response.json().catch(() => ({ error: 'Failed to load portfolio' }));
-            throw new Error(errorData.error || 'Failed to load portfolio');
-        }
-
-        const data = await response.json();
+        // Route through apiFetch for the uniform 10s timeout + error path
+        // (Req 2.8) so a hung/failed portfolio load surfaces a visible error
+        // rather than substituting mock data while the backend is reachable.
+        const data = await apiFetch(`/api/wallets/${walletAddress}/multi-chain-portfolio`);
         state.portfolio = data.data;
         
         displayPortfolio(state.portfolio);
@@ -355,20 +513,24 @@ async function loadWhales() {
     showLoading();
     
     try {
-        const response = await fetch(`${API_BASE_URL}/api/whales/tracked`);
-        
-        if (!response.ok) {
-            throw new Error('Failed to load whales');
-        }
-
-        const data = await response.json();
+        const data = await apiFetch('/api/whales/tracked');
         state.whales = data.data || [];
         
         displayWhales(state.whales);
         
     } catch (error) {
         console.error('Error loading whales:', error);
-        displayMockWhales();
+        if (!state.backendReachable) {
+            // Backend was unreachable at open: placeholder data is permitted
+            // only alongside the persistent "data not live" banner (Req 2.5).
+            showDataNotLiveBanner();
+            displayMockWhales();
+        } else {
+            // Backend reachable but this request failed: visible error, no
+            // mock substitution (Requirements 2.3, 2.4, 2.7).
+            renderInlineError('whalesList', `Failed to load whales: ${error.message}`);
+            showError(`Failed to load whales: ${error.message}`);
+        }
     } finally {
         hideLoading();
     }
@@ -408,6 +570,8 @@ function displayWhales(whales) {
     });
 }
 
+// Placeholder data for the backend-unreachable-at-open path; only rendered
+// alongside the persistent "data not live" banner (Requirement 2.5).
 function displayMockWhales() {
     const mockWhales = [
         { address: '7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU', total_value_usd: 5000000, multiplier: 150, rank: 1 },
@@ -443,7 +607,7 @@ async function loadAnalytics() {
         
     } catch (error) {
         console.error('Error loading analytics:', error);
-        displayMockAnalytics();
+        showError(`Failed to load analytics: ${error.message}`);
     } finally {
         hideLoading();
     }
@@ -451,23 +615,25 @@ async function loadAnalytics() {
 
 async function loadPortfolioPerformance() {
     try {
-        const response = await fetch(`${API_BASE_URL}/api/analytics/portfolio-performance`, {
+        const data = await apiFetch('/api/analytics/portfolio-performance', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 wallet_address: state.connectedWallet,
                 period: state.currentPeriod
             })
         });
         
-        if (!response.ok) throw new Error('Failed to load performance');
-        
-        const data = await response.json();
         displayPerformance(data.data);
         
     } catch (error) {
         console.error('Error loading performance:', error);
-        displayMockPerformance();
+        if (!state.backendReachable) {
+            showDataNotLiveBanner();
+            displayMockPerformance();
+        } else {
+            renderInlineError('performanceChart', `Failed to load performance: ${error.message}`);
+            showError(`Failed to load performance: ${error.message}`);
+        }
     }
 }
 
@@ -499,6 +665,8 @@ function displayPerformance(performance) {
     `;
 }
 
+// Placeholder data for the backend-unreachable-at-open path; only rendered
+// alongside the persistent "data not live" banner (Requirement 2.5).
 function displayMockPerformance() {
     displayPerformance({
         gain_loss_usd: 1250.50,
@@ -510,23 +678,25 @@ function displayMockPerformance() {
 
 async function loadWhaleImpact() {
     try {
-        const response = await fetch(`${API_BASE_URL}/api/analytics/whale-impact`, {
+        const data = await apiFetch('/api/analytics/whale-impact', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 user_id: DEMO_USER_ID,
                 period: state.currentPeriod
             })
         });
         
-        if (!response.ok) throw new Error('Failed to load whale impact');
-        
-        const data = await response.json();
         displayWhaleImpact(data.data);
         
     } catch (error) {
         console.error('Error loading whale impact:', error);
-        displayMockWhaleImpact();
+        if (!state.backendReachable) {
+            showDataNotLiveBanner();
+            displayMockWhaleImpact();
+        } else {
+            renderInlineError('whaleImpact', `Failed to load whale impact: ${error.message}`);
+            showError(`Failed to load whale impact: ${error.message}`);
+        }
     }
 }
 
@@ -561,6 +731,8 @@ function displayWhaleImpact(impact) {
     });
 }
 
+// Placeholder data for the backend-unreachable-at-open path; only rendered
+// alongside the persistent "data not live" banner (Requirement 2.5).
 function displayMockWhaleImpact() {
     displayWhaleImpact({
         total_movements: 12,
@@ -573,23 +745,25 @@ function displayMockWhaleImpact() {
 
 async function loadRecommendationAccuracy() {
     try {
-        const response = await fetch(`${API_BASE_URL}/api/analytics/recommendation-accuracy`, {
+        const data = await apiFetch('/api/analytics/recommendation-accuracy', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 user_id: DEMO_USER_ID,
                 period: state.currentPeriod
             })
         });
         
-        if (!response.ok) throw new Error('Failed to load recommendation accuracy');
-        
-        const data = await response.json();
         displayRecommendationAccuracy(data.data);
         
     } catch (error) {
         console.error('Error loading recommendation accuracy:', error);
-        displayMockRecommendationAccuracy();
+        if (!state.backendReachable) {
+            showDataNotLiveBanner();
+            displayMockRecommendationAccuracy();
+        } else {
+            renderInlineError('recommendationAccuracy', `Failed to load recommendation accuracy: ${error.message}`);
+            showError(`Failed to load recommendation accuracy: ${error.message}`);
+        }
     }
 }
 
@@ -614,6 +788,8 @@ function displayRecommendationAccuracy(accuracy) {
     `;
 }
 
+// Placeholder data for the backend-unreachable-at-open path; only rendered
+// alongside the persistent "data not live" banner (Requirement 2.5).
 function displayMockRecommendationAccuracy() {
     displayRecommendationAccuracy({
         total_recommendations: 25,
@@ -622,12 +798,6 @@ function displayMockRecommendationAccuracy() {
         accuracy_rate: 83.3,
         average_confidence: 75.5
     });
-}
-
-function displayMockAnalytics() {
-    displayMockPerformance();
-    displayMockWhaleImpact();
-    displayMockRecommendationAccuracy();
 }
 
 // Settings
@@ -972,19 +1142,18 @@ async function loadConversionHistory() {
         // Use a demo user ID for now
         const userId = DEMO_USER_ID;
         
-        const response = await fetch(`${API_BASE_URL}/api/conversions/${userId}/history`);
-        
-        if (!response.ok) {
-            throw new Error('Failed to load conversion history');
-        }
-        
-        const data = await response.json();
+        const data = await apiFetch(`/api/conversions/${userId}/history`);
         displayConversionHistory(data.data || []);
         
     } catch (error) {
         console.error('Error loading conversion history:', error);
-        // Display mock data for demo
-        displayMockConversionHistory();
+        if (!state.backendReachable) {
+            showDataNotLiveBanner();
+            displayMockConversionHistory();
+        } else {
+            renderInlineError('conversionHistory', `Failed to load conversion history: ${error.message}`);
+            showError(`Failed to load conversion history: ${error.message}`);
+        }
     }
 }
 
@@ -1032,6 +1201,8 @@ function displayConversionHistory(conversions) {
     });
 }
 
+// Placeholder data for the backend-unreachable-at-open path; only rendered
+// alongside the persistent "data not live" banner (Requirement 2.5).
 function displayMockConversionHistory() {
     const mockConversions = [
         {
@@ -1225,20 +1396,20 @@ async function loadBenchmarks() {
     
     try {
         const userId = DEMO_USER_ID;
-        const response = await fetch(`${API_BASE_URL}/api/benchmarks/${userId}`);
-        
-        if (!response.ok) {
-            throw new Error('Failed to load benchmarks');
-        }
-        
-        const data = await response.json();
+        const data = await apiFetch(`/api/benchmarks/${userId}`);
         state.benchmarks = data.data || [];
         
         displayBenchmarks(state.benchmarks);
         
     } catch (error) {
         console.error('Error loading benchmarks:', error);
-        displayMockBenchmarks();
+        if (!state.backendReachable) {
+            showDataNotLiveBanner();
+            displayMockBenchmarks();
+        } else {
+            renderInlineError('benchmarksList', `Failed to load benchmarks: ${error.message}`);
+            showError(`Failed to load benchmarks: ${error.message}`);
+        }
     } finally {
         hideLoading();
     }
@@ -1346,6 +1517,8 @@ async function deleteBenchmark(benchmarkId) {
     }
 }
 
+// Placeholder data for the backend-unreachable-at-open path; only rendered
+// alongside the persistent "data not live" banner (Requirement 2.5).
 function displayMockBenchmarks() {
     const mockBenchmarks = [
         {
@@ -1491,32 +1664,36 @@ async function loadMyOffers() {
     
     try {
         const userId = DEMO_USER_ID;
-        const response = await fetch(`${API_BASE_URL}/api/p2p/${userId}/offers`);
-        
-        if (!response.ok) throw new Error('Failed to load offers');
-        
-        const data = await response.json();
+        const data = await apiFetch(`/api/p2p/${userId}/offers`);
         displayMyOffers(data.data || []);
         
     } catch (error) {
         console.error('Error loading my offers:', error);
-        displayMockMyOffers();
+        if (!state.backendReachable) {
+            showDataNotLiveBanner();
+            displayMockMyOffers();
+        } else {
+            renderInlineError('myOffersList', `Failed to load your offers: ${error.message}`);
+            showError(`Failed to load your offers: ${error.message}`);
+        }
     }
 }
 
 async function loadMarketplace() {
     try {
         const userId = DEMO_USER_ID;
-        const response = await fetch(`${API_BASE_URL}/api/p2p/${userId}/marketplace`);
-        
-        if (!response.ok) throw new Error('Failed to load marketplace');
-        
-        const data = await response.json();
+        const data = await apiFetch(`/api/p2p/${userId}/marketplace`);
         displayMarketplace(data.data || []);
         
     } catch (error) {
         console.error('Error loading marketplace:', error);
-        displayMockMarketplace();
+        if (!state.backendReachable) {
+            showDataNotLiveBanner();
+            displayMockMarketplace();
+        } else {
+            renderInlineError('marketplaceList', `Failed to load marketplace: ${error.message}`);
+            showError(`Failed to load marketplace: ${error.message}`);
+        }
     }
 }
 
@@ -1737,6 +1914,16 @@ function contactTrader(conversationId, otherUserId) {
     state.activeConversationId = conversationId;
     state.activeConversationUserId = otherUserId;
     
+    // Set the active chat partner so sendMessage() targets the real backend
+    // chat endpoint instead of bailing with "select a contact first". This is
+    // a synthetic contact representing the P2P trade counterparty (identified
+    // by their user id) rather than a proximity peer (identified by wallet).
+    selectedContact = {
+        user_id: otherUserId,
+        user_tag: 'Trade Partner',
+        is_trade_partner: true
+    };
+    
     // Load the conversation
     loadConversationById(conversationId);
     
@@ -1750,32 +1937,58 @@ async function loadConversationById(conversationId) {
         return;
     }
     
+    // Enable chat input
+    document.getElementById('chatInput').disabled = false;
+    document.getElementById('sendMessageBtn').disabled = false;
+    
+    // Load the real message history with the trade partner. Messages are keyed
+    // by the two user ids, so we fetch via the chat messages endpoint using the
+    // active partner's user id rather than the (unrouted) conversation id.
+    const otherUserId = state.activeConversationUserId;
+    if (!otherUserId) {
+        document.getElementById('chatMessages').innerHTML =
+            '<p class="empty-state">Chat ready. Start messaging to coordinate your trade.</p>';
+        return;
+    }
+    await loadTradeChatHistory(otherUserId);
+}
+
+// Derive a per-conversation encryption key that is unique to the two traders.
+// The key is SHA-256 over the two participant user ids sorted (so both sides
+// compute the same key), yielding a 32-byte value rendered as 64 hex chars.
+// This makes each trader pair's chat cryptographically distinct: messages for
+// one counterparty cannot be decrypted with another counterparty's key.
+async function deriveConversationKey(userIdA, userIdB) {
+    const pair = [userIdA, userIdB].sort().join(':');
+    const bytes = new TextEncoder().encode(`lattice-chat:${pair}`);
+    const digest = await crypto.subtle.digest('SHA-256', bytes);
+    return Array.from(new Uint8Array(digest))
+        .map(b => b.toString(16).padStart(2, '0'))
+        .join('');
+}
+
+async function loadTradeChatHistory(otherUserId) {
+    const container = document.getElementById('chatMessages');
     try {
-        // Enable chat input
-        document.getElementById('chatInput').disabled = false;
-        document.getElementById('sendMessageBtn').disabled = false;
-        
-        // For now, show a placeholder indicating the conversation is ready
-        // In a full implementation, this would fetch messages from the conversation
-        document.getElementById('chatMessages').innerHTML = `
-            <p class="empty-state">Chat conversation loaded (Conversation ID: ${conversationId.substring(0, 8)}...)</p>
-            <p class="empty-state" style="margin-top: 1rem;">Messages are encrypted end-to-end. Start chatting to coordinate your trade.</p>
-        `;
-        
-        // Optionally fetch actual messages if the endpoint exists
-        const response = await fetch(`${API_BASE_URL}/api/chat/conversations/${conversationId}/messages`);
-        if (response.ok) {
-            const data = await response.json();
-            displayChatMessages(data.data || []);
-        }
-        
+        const key = await deriveConversationKey(DEMO_USER_ID, otherUserId);
+        const data = await apiFetch(`/api/chat/${DEMO_USER_ID}/messages`, {
+            method: 'POST',
+            body: JSON.stringify({
+                other_user_id: otherUserId,
+                encryption_key: key,
+                limit: 50
+            })
+        });
+        displayChatMessages(data.data || []);
     } catch (error) {
-        console.error('Error loading conversation:', error);
-        document.getElementById('chatMessages').innerHTML = 
+        console.error('Error loading conversation messages:', error);
+        container.innerHTML =
             '<p class="empty-state">Chat ready. Start messaging to coordinate your trade.</p>';
     }
 }
 
+// Placeholder data for the backend-unreachable-at-open path; only rendered
+// alongside the persistent "data not live" banner (Requirement 2.5).
 function displayMockMyOffers() {
     const mockOffers = [
         {
@@ -1791,6 +2004,8 @@ function displayMockMyOffers() {
     displayMyOffers(mockOffers);
 }
 
+// Placeholder data for the backend-unreachable-at-open path; only rendered
+// alongside the persistent "data not live" banner (Requirement 2.5).
 function displayMockMarketplace() {
     const mockOffers = [
         {
@@ -1953,33 +2168,6 @@ function displayChatMessages(messages) {
     container.scrollTop = container.scrollHeight;
 }
 
-function displayMockChatHistory() {
-    const mockMessages = [
-        {
-            id: '1',
-            from_user_id: 'other-user',
-            content: 'Hey, interested in your SOL offer!',
-            blockchain_hash: null,
-            created_at: new Date(Date.now() - 3600000).toISOString()
-        },
-        {
-            id: '2',
-            from_user_id: DEMO_USER_ID,
-            content: 'Sure! The rate is 200 USDC per SOL.',
-            blockchain_hash: '0x123abc...',
-            created_at: new Date(Date.now() - 3000000).toISOString()
-        },
-        {
-            id: '3',
-            from_user_id: 'other-user',
-            content: 'Sounds good, let me check my balance.',
-            blockchain_hash: null,
-            created_at: new Date(Date.now() - 1800000).toISOString()
-        }
-    ];
-    displayChatMessages(mockMessages);
-}
-
 async function sendMessage() {
     if (!selectedContact) {
         showToast('Please select a contact first', 'warning');
@@ -1992,7 +2180,39 @@ async function sendMessage() {
     
     if (!message) return;
     
-    // Chat is a demo feature - just add to UI
+    // When chatting with a P2P trade partner we have their user id, so send the
+    // message through the real backend chat endpoint (persisted + encrypted).
+    // Proximity contacts only carry a wallet address (no user id), so they keep
+    // the local demo behavior below.
+    if (selectedContact.user_id) {
+        const partnerId = selectedContact.user_id;
+        try {
+            // Per-conversation key, unique to this trader pair (see
+            // deriveConversationKey). Send and fetch use the same derived key so
+            // the thread stays isolated to these two participants.
+            const key = await deriveConversationKey(DEMO_USER_ID, partnerId);
+            await apiFetch(`/api/chat/${DEMO_USER_ID}/send`, {
+                method: 'POST',
+                body: JSON.stringify({
+                    to_user_id: partnerId,
+                    content: message,
+                    encryption_key: key,
+                    verify_on_chain: verifyOnChain,
+                    blockchain: verifyOnChain ? 'Solana' : null
+                })
+            });
+            input.value = '';
+            // Reload the thread so the newly sent message (and any replies) show.
+            await loadTradeChatHistory(partnerId);
+            showToast('Message sent', 'success');
+        } catch (error) {
+            console.error('Error sending message:', error);
+            showError(`Failed to send message: ${error.message}`);
+        }
+        return;
+    }
+    
+    // Proximity-contact demo path: append to the UI only.
     const messagesDiv = document.getElementById('chatMessages');
     const messageEl = document.createElement('div');
     messageEl.className = 'chat-message sent';
@@ -2014,7 +2234,8 @@ async function verifyMessage(messageId) {
     
     try {
         const userId = DEMO_USER_ID;
-        const response = await fetch(`${API_BASE_URL}/api/chat/${userId}/verify/${messageId}`);
+        // Backend route is GET /api/chat/messages/:message_id/verify (no user_id segment).
+        const response = await fetch(`${API_BASE_URL}/api/chat/messages/${messageId}/verify`);
         
         if (!response.ok) throw new Error('Failed to verify message');
         
@@ -2041,8 +2262,12 @@ async function reportMessage(messageId) {
     
     try {
         const userId = DEMO_USER_ID;
-        const response = await fetch(`${API_BASE_URL}/api/chat/${userId}/report/${messageId}`, {
-            method: 'POST'
+        // Backend route is POST /api/chat/:user_id/messages/:message_id/report
+        // and expects a JSON body with a `reason`.
+        const response = await fetch(`${API_BASE_URL}/api/chat/${userId}/messages/${messageId}/report`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ reason: 'Reported from chat UI' })
         });
         
         if (!response.ok) throw new Error('Failed to report message');
@@ -2178,16 +2403,18 @@ async function createTempWallet() {
 async function loadTempWallets() {
     try {
         const userId = DEMO_USER_ID;
-        const response = await fetch(`${API_BASE_URL}/api/privacy/${userId}/temporary-wallets`);
-        
-        if (!response.ok) throw new Error('Failed to load temporary wallets');
-        
-        const data = await response.json();
+        const data = await apiFetch(`/api/privacy/${userId}/temporary-wallets`);
         displayTempWallets(data.data || []);
         
     } catch (error) {
         console.error('Error loading temporary wallets:', error);
-        displayMockTempWallets();
+        if (!state.backendReachable) {
+            showDataNotLiveBanner();
+            displayMockTempWallets();
+        } else {
+            renderInlineError('tempWalletsList', `Failed to load temporary wallets: ${error.message}`);
+            showError(`Failed to load temporary wallets: ${error.message}`);
+        }
     }
 }
 
@@ -2249,6 +2476,8 @@ function displayTempWallets(wallets) {
     });
 }
 
+// Placeholder data for the backend-unreachable-at-open path; only rendered
+// alongside the persistent "data not live" banner (Requirement 2.5).
 function displayMockTempWallets() {
     const mockWallets = [
         {
@@ -2394,16 +2623,18 @@ async function unfreezeTempWallet(walletAddress) {
 async function loadWalletFreezeStatus() {
     try {
         const userId = DEMO_USER_ID;
-        const response = await fetch(`${API_BASE_URL}/api/privacy/${userId}/wallets`);
-        
-        if (!response.ok) throw new Error('Failed to load wallet freeze status');
-        
-        const data = await response.json();
+        const data = await apiFetch(`/api/privacy/${userId}/wallets`);
         displayWalletFreezeStatus(data.data || []);
         
     } catch (error) {
         console.error('Error loading wallet freeze status:', error);
-        displayMockWalletFreezeStatus();
+        if (!state.backendReachable) {
+            showDataNotLiveBanner();
+            displayMockWalletFreezeStatus();
+        } else {
+            renderInlineError('walletFreezeList', `Failed to load wallet freeze status: ${error.message}`);
+            showError(`Failed to load wallet freeze status: ${error.message}`);
+        }
     }
 }
 
@@ -2445,6 +2676,8 @@ function displayWalletFreezeStatus(wallets) {
     });
 }
 
+// Placeholder data for the backend-unreachable-at-open path; only rendered
+// alongside the persistent "data not live" banner (Requirement 2.5).
 function displayMockWalletFreezeStatus() {
     const mockWallets = [
         {
@@ -2469,7 +2702,9 @@ async function freezeWallet(walletAddress) {
     try {
         const userId = DEMO_USER_ID;
         const response = await fetch(`${API_BASE_URL}/api/privacy/${userId}/wallets/${walletAddress}/freeze`, {
-            method: 'POST'
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({})
         });
         
         if (!response.ok) throw new Error('Failed to freeze wallet');
@@ -2639,16 +2874,18 @@ async function loadAIActions() {
     
     try {
         const userId = DEMO_USER_ID;
-        const response = await fetch(`${API_BASE_URL}/api/analytics/${userId}/ai-actions`);
-        
-        if (!response.ok) throw new Error('Failed to load AI actions');
-        
-        const data = await response.json();
+        const data = await apiFetch(`/api/analytics/${userId}/ai-actions`);
         displayAIActions(data.data || []);
         
     } catch (error) {
         console.error('Error loading AI actions:', error);
-        displayMockAIActions();
+        if (!state.backendReachable) {
+            showDataNotLiveBanner();
+            displayMockAIActions();
+        } else {
+            renderInlineError('aiActionsList', `Failed to load AI actions: ${error.message}`);
+            showError(`Failed to load AI actions: ${error.message}`);
+        }
     }
 }
 
@@ -2691,6 +2928,8 @@ function displayAIActions(actions) {
     });
 }
 
+// Placeholder data for the backend-unreachable-at-open path; only rendered
+// alongside the persistent "data not live" banner (Requirement 2.5).
 function displayMockAIActions() {
     const mockActions = [
         {
@@ -2746,7 +2985,12 @@ async function loadPositionDistribution() {
         
     } catch (error) {
         console.error('Error loading position distribution:', error);
-        displayMockDistribution();
+        if (!state.backendReachable) {
+            showDataNotLiveBanner();
+            displayMockDistribution();
+        } else {
+            showError(`Failed to load position distribution: ${error.message}`);
+        }
     }
 }
 
@@ -2791,6 +3035,8 @@ function displayDistributionList(canvasId, distribution, title) {
     });
 }
 
+// Placeholder data for the backend-unreachable-at-open path; only rendered
+// alongside the persistent "data not live" banner (Requirement 2.5).
 function displayMockDistribution() {
     const mockBlockchainDist = {
         'Solana': 12500,
@@ -2839,6 +3085,35 @@ function showToast(message, type = 'success') {
         toast.style.animation = 'slideIn 0.3s ease-out reverse';
         setTimeout(() => toast.remove(), 300);
     }, 3000);
+}
+
+/**
+ * Surface a visible, transient error notification to the operator.
+ *
+ * Thin wrapper over `showToast(message, 'error')` so every backend-failure
+ * path has a single, consistent error-indication entry point (Req 2.7).
+ */
+function showError(message) {
+    showToast(message, 'error');
+}
+
+/**
+ * Render a visible inline error into the container where a view's data would
+ * otherwise have rendered.
+ *
+ * This keeps the failed operation identifiable in-place and retains the
+ * current view (no navigation away, no mock-data substitution), satisfying
+ * the rule that a reachable-backend failure shows a visible error rather than
+ * silently falling back to mock data (Req 2.3, 2.4, 2.7).
+ *
+ * @param {string} containerId - The element id where the list/section renders.
+ * @param {string} message - The error text identifying the failed operation.
+ */
+function renderInlineError(containerId, message) {
+    const container = document.getElementById(containerId);
+    if (container) {
+        container.innerHTML = `<p class="error-state">⚠ ${message}</p>`;
+    }
 }
 
 function loadSavedWallet() {

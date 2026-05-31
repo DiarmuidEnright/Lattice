@@ -26,6 +26,10 @@ impl std::fmt::Display for DiscoveryMethod {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DiscoveredPeer {
     pub peer_id: PeerId,
+    /// The peer's real user account id (UUID). Broadcast in the discovery
+    /// announcement so a transfer can target a valid `users(id)` directly.
+    /// `peer_id` remains the device-level identifier used for dedup/display.
+    pub user_id: Uuid,
     pub user_tag: String,
     pub wallet_address: String,
     pub discovery_method: DiscoveryMethod,
@@ -40,8 +44,12 @@ pub struct DiscoveredPeer {
 pub enum TransferStatus {
     Pending,
     Accepted,
-    Rejected,
     Executing,
+    /// Accepted and recorded while offline (no blockchain reachable). The funds
+    /// have NOT settled on-chain yet; a background sync task submits these to the
+    /// chain once connectivity returns, then transitions them to Completed.
+    PendingSettlement,
+    Rejected,
     Completed,
     Failed,
     Expired,
@@ -52,8 +60,9 @@ impl std::fmt::Display for TransferStatus {
         match self {
             TransferStatus::Pending => write!(f, "Pending"),
             TransferStatus::Accepted => write!(f, "Accepted"),
-            TransferStatus::Rejected => write!(f, "Rejected"),
             TransferStatus::Executing => write!(f, "Executing"),
+            TransferStatus::PendingSettlement => write!(f, "PendingSettlement"),
+            TransferStatus::Rejected => write!(f, "Rejected"),
             TransferStatus::Completed => write!(f, "Completed"),
             TransferStatus::Failed => write!(f, "Failed"),
             TransferStatus::Expired => write!(f, "Expired"),

@@ -6,7 +6,7 @@ pub mod platform;
 use crate::error::{StealthError, StealthResult};
 use crate::keypair::StealthKeyPair;
 use aes_gcm::{
-    aead::{Aead, KeyInit, OsRng},
+    aead::{Aead, KeyInit},
     Aes256Gcm, Nonce,
 };
 use async_trait::async_trait;
@@ -15,7 +15,6 @@ use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use zeroize::Zeroize;
 
 /// Trait for platform-agnostic secure storage
 /// 

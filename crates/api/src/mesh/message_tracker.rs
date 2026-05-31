@@ -148,7 +148,6 @@ impl MessageTracker {
     pub async fn persist_to_cache(&self) -> Result<()> {
         let cache = self.seen_messages.read().await;
         let mut conn = self.redis.clone();
-        let expiration_secs = self.expiration.num_seconds() as u64;
         
         let mut persisted_count = 0;
         

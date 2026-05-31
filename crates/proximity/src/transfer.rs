@@ -28,6 +28,8 @@ use uuid::Uuid;
 
 const TRANSFER_TIMEOUT_SECS: i64 = 60;
 const CLEANUP_INTERVAL_SECS: u64 = 10;
+/// How often the background task attempts to settle offline-queued transfers.
+const SETTLEMENT_SYNC_INTERVAL_SECS: u64 = 15;
 
 /// Transfer Service manages proximity transfer requests
 /// 
@@ -37,6 +39,12 @@ pub struct TransferService {
     queued_requests: Arc<RwLock<Vec<TransferRequest>>>,
     db_pool: DbPool,
     solana_client: Arc<SolanaClient>,
+    /// Optional backend-custodied signer used to actually submit on-chain
+    /// transfers for the demo. When present (devnet only), `execute_sol_transfer`
+    /// signs and submits a real SOL transfer from this keypair. When absent, the
+    /// transfer execution remains a no-op placeholder (the platform does not hold
+    /// users' private keys in production).
+    custodial_signer: Option<Arc<Keypair>>,
     shutdown_notify: Arc<Notify>,
     max_concurrent_transfers: usize,
 }
@@ -49,6 +57,7 @@ impl TransferService {
             queued_requests: Arc::new(RwLock::new(Vec::new())),
             db_pool,
             solana_client,
+            custodial_signer: None,
             shutdown_notify: Arc::new(Notify::new()),
             max_concurrent_transfers: 5, // Default limit per user
         };
@@ -57,6 +66,17 @@ impl TransferService {
         service.start_cleanup_task();
         
         service
+    }
+
+    /// Attach a backend-custodied signer so transfers are actually submitted
+    /// on-chain. Intended for a devnet demo wallet only.
+    pub fn with_custodial_signer(mut self, signer: Arc<Keypair>) -> Self {
+        info!(
+            "Custodial signer attached for on-chain transfers: {}",
+            signer.pubkey()
+        );
+        self.custodial_signer = Some(signer);
+        self
     }
 
     /// Create a transfer request with balance validation
@@ -138,8 +158,74 @@ impl TransferService {
         requests.insert(request.id, request.clone());
         drop(requests);
 
+        // Also persist the pending request to the DB so a DIFFERENT instance
+        // (e.g. the recipient's node in a two-user setup) can look it up and
+        // accept it. The proximity transfer state must not live only in the
+        // creating instance's memory.
+        if let Err(e) = self
+            .persist_transfer_to_db(&request, "", TransferStatus::Pending)
+            .await
+        {
+            warn!("Failed to persist pending transfer {}: {}", request.id, e);
+        }
+
         info!("Transfer request created: id={}", request.id);
         Ok(request)
+    }
+
+    /// Load a transfer request from the database. Used as a fallback when the
+    /// request was created on a different instance (so it's not in this node's
+    /// in-memory `active_requests`).
+    async fn load_request_from_db(&self, request_id: Uuid) -> Result<Option<TransferRequest>> {
+        let record = database::proximity::get_transfer_by_id(&self.db_pool, request_id)
+            .await
+            .map_err(|e| ProximityError::InternalError(format!("Failed to load transfer: {}", e)))?;
+
+        Ok(record.map(|r| {
+            let status = match r.status.as_str() {
+                "Pending" => TransferStatus::Pending,
+                "Accepted" => TransferStatus::Accepted,
+                "Executing" => TransferStatus::Executing,
+                "PendingSettlement" => TransferStatus::PendingSettlement,
+                "Completed" => TransferStatus::Completed,
+                "Rejected" => TransferStatus::Rejected,
+                "Failed" => TransferStatus::Failed,
+                "Expired" => TransferStatus::Expired,
+                _ => TransferStatus::Pending,
+            };
+            TransferRequest {
+                id: r.id,
+                sender_user_id: r.sender_user_id,
+                sender_wallet: r.sender_wallet,
+                recipient_user_id: r.recipient_user_id,
+                recipient_wallet: r.recipient_wallet,
+                asset: r.asset,
+                amount: r.amount,
+                status,
+                created_at: r.created_at,
+                expires_at: r.created_at + Duration::seconds(TRANSFER_TIMEOUT_SECS),
+            }
+        }))
+    }
+
+    /// Ensure a transfer request is present in this node's in-memory map,
+    /// loading it from the DB if it was created on another instance. Returns the
+    /// request, or TransferNotFound if it exists nowhere.
+    async fn ensure_request_loaded(&self, request_id: Uuid) -> Result<TransferRequest> {
+        {
+            let requests = self.active_requests.read().await;
+            if let Some(r) = requests.get(&request_id) {
+                return Ok(r.clone());
+            }
+        }
+        match self.load_request_from_db(request_id).await? {
+            Some(req) => {
+                let mut requests = self.active_requests.write().await;
+                let entry = requests.entry(request_id).or_insert_with(|| req.clone());
+                Ok(entry.clone())
+            }
+            None => Err(ProximityError::TransferNotFound(request_id.to_string())),
+        }
     }
 
     /// Create a transfer request with token account validation
@@ -189,6 +275,10 @@ impl TransferService {
     /// **Validates: Requirements 6.4**
     pub async fn accept_transfer(&self, request_id: Uuid) -> Result<()> {
         info!("Accepting transfer request: {}", request_id);
+
+        // Ensure the request is in our in-memory map (loading from the DB if it
+        // was created on another instance — e.g. the sender's node).
+        self.ensure_request_loaded(request_id).await?;
 
         let mut requests = self.active_requests.write().await;
         
@@ -308,22 +398,191 @@ impl TransferService {
                 e
             })?;
 
-        // Update status to Completed
+        // Persist to database BEFORE marking the transfer as Completed so that a
+        // persistence failure never leaves the transfer in a success state
+        // (persist-then-success). The error propagates via `?` before any success
+        // status is produced, so the caller never observes a successful completion
+        // for a transfer that was not recorded.
+        self.persist_transfer_to_db(&request_clone, &tx_hash, TransferStatus::Completed)
+            .await?;
+
+        // Update status to Completed only after both blockchain execution and
+        // persistence have succeeded.
         let mut requests = self.active_requests.write().await;
         if let Some(request) = requests.get_mut(&request_id) {
             request.status = TransferStatus::Completed;
         }
         drop(requests);
 
-        // Persist to database
-        self.persist_transfer_to_db(&request_clone, &tx_hash, TransferStatus::Completed)
-            .await?;
-
         // Process queued requests for this user
         let _ = self.process_queued_requests(request_clone.sender_user_id).await;
 
         info!("Transfer executed successfully: {} (tx: {})", request_id, tx_hash);
         Ok(tx_hash)
+    }
+
+    /// Check whether the blockchain (Solana RPC) is currently reachable.
+    pub async fn is_blockchain_online(&self) -> bool {
+        self.solana_client.health_check().await.is_ok()
+    }
+
+    /// Accept-and-settle a transfer with offline tolerance.
+    ///
+    /// If the blockchain is reachable, this behaves like `execute_transfer`:
+    /// the transfer is submitted on-chain and marked `Completed`, returning the
+    /// real transaction hash.
+    ///
+    /// If the blockchain is NOT reachable (both peers effectively offline w.r.t.
+    /// the chain), the transfer is durably recorded as `PendingSettlement` in the
+    /// database with no transaction hash and `Ok(None)` is returned. A background
+    /// sync task (`sync_pending_settlements`) submits it on-chain automatically
+    /// once connectivity returns, transitioning it to `Completed`. This is the
+    /// offline create-now / settle-later path.
+    pub async fn execute_or_queue_transfer(&self, request_id: Uuid) -> Result<Option<String>> {
+        // Snapshot the accepted request.
+        let request_clone = {
+            let mut requests = self.active_requests.write().await;
+            let request = requests
+                .get_mut(&request_id)
+                .ok_or_else(|| ProximityError::TransferNotFound(request_id.to_string()))?;
+            if request.status != TransferStatus::Accepted {
+                return Err(ProximityError::InternalError(format!(
+                    "Transfer request {} is not accepted (status: {})",
+                    request_id, request.status
+                )));
+            }
+            request.clone()
+        };
+
+        if self.is_blockchain_online().await {
+            // Online: settle immediately on-chain.
+            let tx_hash = self.execute_transfer(request_id).await?;
+            return Ok(Some(tx_hash));
+        }
+
+        // Offline: durably record as PendingSettlement (no tx hash yet).
+        warn!(
+            "Blockchain unreachable; queuing transfer {} for later settlement",
+            request_id
+        );
+        self.persist_transfer_to_db(&request_clone, "", TransferStatus::PendingSettlement)
+            .await?;
+
+        let mut requests = self.active_requests.write().await;
+        if let Some(request) = requests.get_mut(&request_id) {
+            request.status = TransferStatus::PendingSettlement;
+        }
+        drop(requests);
+
+        info!(
+            "Transfer {} recorded as PendingSettlement (will sync when online)",
+            request_id
+        );
+        Ok(None)
+    }
+
+    /// Settle all transfers that were recorded offline.
+    ///
+    /// Scans the database for `PendingSettlement` transfers, submits each on-chain
+    /// (when the blockchain is reachable), and updates the row to `Completed` with
+    /// the real transaction hash (or `Failed` if the on-chain submission errors).
+    /// Returns the number of transfers successfully settled. Safe to call
+    /// repeatedly (idempotent: only acts on rows still in `PendingSettlement`).
+    pub async fn sync_pending_settlements(&self) -> Result<usize> {
+        // Nothing to do if we still cannot reach the chain.
+        if !self.is_blockchain_online().await {
+            return Ok(0);
+        }
+
+        let client = self.db_pool.get().await.map_err(|e| {
+            ProximityError::InternalError(format!("Database connection error: {}", e))
+        })?;
+
+        let rows = client
+            .query(
+                "SELECT id, sender_user_id, sender_wallet, recipient_user_id,
+                        recipient_wallet, asset, amount, created_at
+                 FROM proximity_transfers
+                 WHERE status = 'PendingSettlement'
+                 ORDER BY created_at ASC",
+                &[],
+            )
+            .await
+            .map_err(|e| ProximityError::InternalError(format!("Failed to query pending settlements: {}", e)))?;
+
+        if rows.is_empty() {
+            return Ok(0);
+        }
+
+        info!("Syncing {} pending offline transfer(s) to the blockchain", rows.len());
+        let mut settled = 0usize;
+
+        for row in rows {
+            let request = TransferRequest {
+                id: row.get(0),
+                sender_user_id: row.get(1),
+                sender_wallet: row.get(2),
+                recipient_user_id: row.get(3),
+                recipient_wallet: row.get(4),
+                asset: row.get(5),
+                amount: row.get(6),
+                status: TransferStatus::PendingSettlement,
+                created_at: row.get::<_, chrono::NaiveDateTime>(7).and_utc(),
+                expires_at: Utc::now(),
+            };
+
+            match self.execute_blockchain_transaction(&request).await {
+                Ok(tx_hash) => {
+                    // Mark Completed with the real on-chain signature.
+                    if let Err(e) = client
+                        .execute(
+                            "UPDATE proximity_transfers
+                             SET status = 'Completed', transaction_hash = $2, completed_at = NOW()
+                             WHERE id = $1 AND status = 'PendingSettlement'",
+                            &[&request.id, &tx_hash],
+                        )
+                        .await
+                    {
+                        error!("Settled on-chain but failed to update row {}: {}", request.id, e);
+                        continue;
+                    }
+                    info!("Synced offline transfer {} -> on-chain tx {}", request.id, tx_hash);
+                    settled += 1;
+                }
+                Err(e) => {
+                    warn!("Failed to settle pending transfer {} (will retry): {}", request.id, e);
+                    // Leave as PendingSettlement so a future sync retries it.
+                }
+            }
+        }
+
+        info!("Pending-settlement sync complete: {} settled", settled);
+        Ok(settled)
+    }
+
+    /// Start a background task that periodically settles offline transfers once
+    /// blockchain connectivity is available.
+    pub fn start_settlement_sync_task(self: &Arc<Self>) {
+        let service = Arc::clone(self);
+        let shutdown = Arc::clone(&self.shutdown_notify);
+        tokio::spawn(async move {
+            let mut ticker = interval(TokioDuration::from_secs(SETTLEMENT_SYNC_INTERVAL_SECS));
+            loop {
+                tokio::select! {
+                    _ = ticker.tick() => {
+                        match service.sync_pending_settlements().await {
+                            Ok(n) if n > 0 => info!("Settlement sync task settled {} offline transfer(s)", n),
+                            Ok(_) => {}
+                            Err(e) => debug!("Settlement sync skipped/failed: {}", e),
+                        }
+                    }
+                    _ = shutdown.notified() => {
+                        debug!("Settlement sync task received shutdown");
+                        break;
+                    }
+                }
+            }
+        });
     }
 
     /// Execute blockchain transaction for SOL or SPL token transfer
@@ -391,52 +650,64 @@ impl TransferService {
                 ProximityError::InternalError("Amount conversion overflow".to_string())
             })?;
 
-        // Note: In a real implementation, we would need the sender's keypair
-        // For now, we'll create a placeholder transaction structure
-        // The actual signing would happen on the client side or via a secure key management system
-        
-        // Get recent blockhash
-        let recent_blockhash = self
-            .solana_client
-            .primary_client()
-            .get_latest_blockhash()
-            .map_err(|e| {
-                ProximityError::NetworkError(format!("Failed to get recent blockhash: {}", e))
-            })?;
+        // If a custodial signer is configured (devnet demo wallet), submit a
+        // REAL on-chain transfer signed by that keypair. The funds move from the
+        // custodial wallet to the recipient on-chain and we return the real
+        // transaction signature (verifiable on a devnet explorer).
+        //
+        // The `sender` pubkey from the request is informational here; the actual
+        // on-chain source is the custodial signer (the demo wallet that holds
+        // devnet SOL). In production a non-custodial design would sign on the
+        // client instead.
+        if let Some(signer) = &self.custodial_signer {
+            let from = signer.pubkey();
+            info!(
+                "Submitting on-chain SOL transfer: from(custodial)={}, to={}, lamports={}",
+                from, recipient, lamports
+            );
 
-        // Create transfer instruction
-        let instruction = system_instruction::transfer(sender, recipient, lamports);
+            let recipient = *recipient;
+            let signer = Arc::clone(signer);
+            let client = Arc::clone(&self.solana_client);
 
-        // Create a temporary keypair for demonstration
-        // In production, this would be handled by the wallet/signer
-        let payer = Keypair::new();
-        
-        // Create transaction
-        let transaction = Transaction::new_signed_with_payer(
-            &[instruction],
-            Some(&payer.pubkey()),
-            &[&payer],
-            recent_blockhash,
-        );
+            // The solana RpcClient is blocking; run it on a blocking thread.
+            let signature = tokio::task::spawn_blocking(move || {
+                let rpc = client.primary_client();
+                let recent_blockhash = rpc
+                    .get_latest_blockhash()
+                    .map_err(|e| ProximityError::NetworkError(format!("blockhash: {}", e)))?;
+                let instruction = system_instruction::transfer(&from, &recipient, lamports);
+                let transaction = Transaction::new_signed_with_payer(
+                    &[instruction],
+                    Some(&from),
+                    &[signer.as_ref()],
+                    recent_blockhash,
+                );
+                rpc.send_and_confirm_transaction_with_spinner_and_config(
+                    &transaction,
+                    CommitmentConfig::confirmed(),
+                    RpcSendTransactionConfig {
+                        skip_preflight: false,
+                        preflight_commitment: Some(CommitmentConfig::confirmed().commitment),
+                        ..Default::default()
+                    },
+                )
+                .map_err(|e| ProximityError::TransactionFailed(format!("SOL transfer failed: {}", e)))
+            })
+            .await
+            .map_err(|e| ProximityError::InternalError(format!("join error: {}", e)))??;
 
-        // Send transaction
-        let signature = self
-            .solana_client
-            .primary_client()
-            .send_and_confirm_transaction_with_spinner_and_config(
-                &transaction,
-                CommitmentConfig::confirmed(),
-                RpcSendTransactionConfig {
-                    skip_preflight: false,
-                    preflight_commitment: Some(CommitmentConfig::confirmed().commitment),
-                    ..Default::default()
-                },
-            )
-            .map_err(|e| {
-                ProximityError::TransactionFailed(format!("SOL transfer failed: {}", e))
-            })?;
+            info!("On-chain SOL transfer confirmed: {}", signature);
+            return Ok(signature.to_string());
+        }
 
-        Ok(signature.to_string())
+        // No custodial signer configured: the platform does not hold the
+        // sender's key, so we cannot sign a real transfer here. Return an error
+        // rather than pretending success.
+        let _ = (sender, recipient);
+        Err(ProximityError::TransactionFailed(
+            "No signer configured for on-chain transfer (set DEMO_SOLANA_KEYPAIR for the devnet demo wallet)".to_string(),
+        ))
     }
 
     /// Execute SPL token transfer
@@ -723,12 +994,20 @@ impl TransferService {
             format!("Transfer failed. Transaction: {}", tx_hash)
         };
 
-        // Notify sender
+        // Title is NOT NULL in the notifications schema, so provide one.
+        let title = if success {
+            "Proximity Transfer Completed"
+        } else {
+            "Proximity Transfer Failed"
+        };
+
+        // Notify sender. Column is `notification_type` (not `type`), and
+        // `title`/`priority` are NOT NULL in the schema, so they must be set.
         client
             .execute(
-                "INSERT INTO notifications (user_id, type, message, created_at, read)
-                 VALUES ($1, $2, $3, NOW(), false)",
-                &[&sender_id, &notification_type, &message],
+                "INSERT INTO notifications (user_id, notification_type, title, message, priority, created_at, read)
+                 VALUES ($1, $2, $3, $4, $5, NOW(), false)",
+                &[&sender_id, &notification_type, &title, &message, &"MEDIUM"],
             )
             .await
             .map_err(|e| {
@@ -738,9 +1017,9 @@ impl TransferService {
         // Notify recipient
         client
             .execute(
-                "INSERT INTO notifications (user_id, type, message, created_at, read)
-                 VALUES ($1, $2, $3, NOW(), false)",
-                &[&recipient_id, &notification_type, &message],
+                "INSERT INTO notifications (user_id, notification_type, title, message, priority, created_at, read)
+                 VALUES ($1, $2, $3, $4, $5, NOW(), false)",
+                &[&recipient_id, &notification_type, &title, &message, &"MEDIUM"],
             )
             .await
             .map_err(|e| {
@@ -801,11 +1080,15 @@ impl TransferService {
                     &request.recipient_user_id,
                     &request.recipient_wallet,
                     &request.asset,
-                    &request.amount.to_string(),
+                    // amount column is NUMERIC; pass the Decimal directly (a
+                    // String fails to serialize into NUMERIC).
+                    &request.amount,
                     &tx_hash,
                     &status.to_string(),
                     &"WiFi", // Placeholder - should track actual discovery method
-                    &request.created_at,
+                    // created_at column is `timestamp without time zone`; pass a
+                    // NaiveDateTime (a DateTime<Utc> fails to serialize into it).
+                    &request.created_at.naive_utc(),
                 ],
             )
             .await
@@ -928,6 +1211,51 @@ impl TransferService {
             sender_wallet, asset, amount
         );
 
+        let is_sol = asset == "SOL"
+            || asset == "So11111111111111111111111111111111111111112";
+
+        // In the devnet demo the on-chain source of funds is the backend's
+        // custodial signer (the funded demo wallet), NOT the wallet the user
+        // happened to connect on the dashboard. The platform does not hold the
+        // connected wallet's private key, so it can never sign from it. For SOL
+        // transfers, validate against the custodial wallet's REAL on-chain
+        // balance so the check reflects the wallet that actually pays.
+        if is_sol {
+            if let Some(signer) = &self.custodial_signer {
+                let custodial_pubkey = signer.pubkey().to_string();
+                match self.solana_client.get_sol_balance(&custodial_pubkey).await {
+                    Ok(lamports) => {
+                        let balance =
+                            Decimal::from(lamports) / Decimal::from(LAMPORTS_PER_SOL);
+                        let fee_estimate = amount * Decimal::new(1, 2); // ~1%
+                        let required = amount + fee_estimate;
+                        if balance < required {
+                            return Err(ProximityError::InsufficientBalance {
+                                required: required.to_string(),
+                                available: balance.to_string(),
+                            });
+                        }
+                        debug!(
+                            "Custodial balance validation passed: balance={}, required={}",
+                            balance, required
+                        );
+                        return Ok(());
+                    }
+                    Err(e) => {
+                        // If the RPC is unreachable we don't want to hard-block
+                        // the demo on a flaky devnet. Log and allow the request;
+                        // the actual on-chain submit at accept-time will surface
+                        // any real funding problem.
+                        warn!(
+                            "Could not fetch custodial wallet balance ({}); skipping pre-check",
+                            e
+                        );
+                        return Ok(());
+                    }
+                }
+            }
+        }
+
         // Query portfolio assets from database
         let client = self.db_pool.get().await.map_err(|e| {
             ProximityError::InternalError(format!("Database connection error: {}", e))
@@ -949,19 +1277,25 @@ impl TransferService {
 
         let wallet_id: Uuid = wallet_row.get(0);
 
-        // Get asset balance
+        // Get asset balance. The `asset` identifier from the transfer request
+        // may be either a token mint address (e.g. "So111...112") or a symbol
+        // (e.g. "SOL"); portfolio_assets stores both, so match on either to
+        // avoid spurious "insufficient balance" when a symbol is supplied.
         let asset_row = client
             .query_opt(
-                "SELECT amount FROM portfolio_assets WHERE wallet_id = $1 AND token_mint = $2",
+                "SELECT amount FROM portfolio_assets
+                 WHERE wallet_id = $1 AND (token_mint = $2 OR token_symbol = $2)",
                 &[&wallet_id, &asset],
             )
             .await?;
 
         if let Some(row) = asset_row {
-            let balance_str: String = row.get(0);
-            let balance = Decimal::from_str(&balance_str).map_err(|e| {
-                ProximityError::InternalError(format!("Invalid balance format: {}", e))
-            })?;
+            // `amount` is a Postgres NUMERIC column; read it as Decimal directly
+            // (reading into String panics at runtime). Convert to string only
+            // for the existing downstream parsing/logging.
+            let balance: Decimal = row.get(0);
+            let balance_str = balance.to_string();
+            let _ = &balance_str;
 
             // Check if balance is sufficient (including estimated fees)
             // For now, we use a simple 1% fee estimate

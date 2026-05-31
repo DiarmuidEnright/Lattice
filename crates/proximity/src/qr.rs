@@ -150,8 +150,6 @@ impl QrCodeService {
 
 /// Simple base64 encoding helper
 fn base64_encode(data: &[u8]) -> String {
-    use std::fmt::Write;
-    
     const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut result = String::new();
     

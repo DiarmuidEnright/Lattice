@@ -199,9 +199,11 @@ pub async fn get_transfer_by_id(
         status: r.get(8),
         discovery_method: r.get(9),
         transaction_type: r.get(10),
-        created_at: r.get(11),
-        accepted_at: r.get(12),
-        completed_at: r.get(13),
+        // These columns are `timestamp without time zone`; read as
+        // NaiveDateTime and convert to UTC (reading into DateTime<Utc> panics).
+        created_at: r.get::<_, chrono::NaiveDateTime>(11).and_utc(),
+        accepted_at: r.get::<_, Option<chrono::NaiveDateTime>>(12).map(|t| t.and_utc()),
+        completed_at: r.get::<_, Option<chrono::NaiveDateTime>>(13).map(|t| t.and_utc()),
         failed_reason: r.get(14),
     }))
 }
@@ -296,9 +298,10 @@ pub async fn get_user_proximity_transfers(
             status: r.get(8),
             discovery_method: r.get(9),
             transaction_type: r.get(10),
-            created_at: r.get(11),
-            accepted_at: r.get(12),
-            completed_at: r.get(13),
+            // `timestamp without time zone` columns -> read as NaiveDateTime.
+            created_at: r.get::<_, chrono::NaiveDateTime>(11).and_utc(),
+            accepted_at: r.get::<_, Option<chrono::NaiveDateTime>>(12).map(|t| t.and_utc()),
+            completed_at: r.get::<_, Option<chrono::NaiveDateTime>>(13).map(|t| t.and_utc()),
             failed_reason: r.get(14),
         })
         .collect())
