@@ -5,7 +5,7 @@
   "elements": [
     {
       "type": "text",
-      "version": 1,
+      "version": 169,
       "id": "title",
       "fillStyle": "solid",
       "strokeWidth": 2,
@@ -13,33 +13,37 @@
       "roughness": 0,
       "opacity": 100,
       "angle": 0,
-      "x": 360,
-      "y": 30,
+      "x": 30.034668755617474,
+      "y": 59.561727156992816,
       "strokeColor": "#1e1e1e",
       "backgroundColor": "transparent",
-      "width": 560,
+      "width": 922.2635498046875,
       "height": 35,
       "seed": 1001,
       "groupIds": [],
       "frameId": null,
       "roundness": null,
       "boundElements": [],
-      "updated": 1,
+      "updated": 1780293747007,
       "link": null,
       "locked": false,
       "fontSize": 28,
       "fontFamily": 1,
-      "text": "Proximity Discovery - Wi-Fi / hotspot (mDNS) or Bluetooth (BLE), zero config",
+      "text": "Proximity Discovery - Wi-Fi / hotspot (mDNS) and Bluetooth (BLE)",
       "textAlign": "left",
       "verticalAlign": "top",
       "containerId": null,
-      "originalText": "Proximity Discovery - Wi-Fi / hotspot (mDNS) or Bluetooth (BLE), zero config",
+      "originalText": "Proximity Discovery - Wi-Fi / hotspot (mDNS) and Bluetooth (BLE)",
       "lineHeight": 1.25,
-      "baseline": 25
+      "baseline": 25,
+      "versionNonce": 955090748,
+      "index": "a0",
+      "isDeleted": false,
+      "autoResize": true
     },
     {
       "type": "rectangle",
-      "version": 1,
+      "version": 2,
       "id": "alice-box",
       "fillStyle": "solid",
       "strokeWidth": 2,
@@ -60,13 +64,16 @@
         "type": 3
       },
       "boundElements": [],
-      "updated": 1,
+      "updated": 1780293673696,
       "link": null,
-      "locked": false
+      "locked": false,
+      "versionNonce": 1988314244,
+      "index": "a1",
+      "isDeleted": false
     },
     {
       "type": "text",
-      "version": 1,
+      "version": 2,
       "id": "alice-title",
       "fillStyle": "solid",
       "strokeWidth": 2,
@@ -85,7 +92,7 @@
       "frameId": null,
       "roundness": null,
       "boundElements": [],
-      "updated": 1,
+      "updated": 1780293673696,
       "link": null,
       "locked": false,
       "fontSize": 20,
@@ -96,11 +103,15 @@
       "containerId": null,
       "originalText": "Node A — Alice (:3000)",
       "lineHeight": 1.25,
-      "baseline": 18
+      "baseline": 18,
+      "versionNonce": 430192060,
+      "index": "a2",
+      "isDeleted": false,
+      "autoResize": true
     },
     {
       "type": "rectangle",
-      "version": 1,
+      "version": 2,
       "id": "alice-announcer",
       "fillStyle": "solid",
       "strokeWidth": 2,
@@ -121,13 +132,16 @@
         "type": 3
       },
       "boundElements": [],
-      "updated": 1,
+      "updated": 1780293673696,
       "link": null,
-      "locked": false
+      "locked": false,
+      "versionNonce": 1781535748,
+      "index": "a3",
+      "isDeleted": false
     },
     {
       "type": "text",
-      "version": 1,
+      "version": 2,
       "id": "alice-announcer-t",
       "fillStyle": "solid",
       "strokeWidth": 2,
@@ -146,7 +160,7 @@
       "frameId": null,
       "roundness": null,
       "boundElements": [],
-      "updated": 1,
+      "updated": 1780293673696,
       "link": null,
       "locked": false,
       "fontSize": 14,
@@ -157,11 +171,15 @@
       "containerId": null,
       "originalText": "MdnsAnnouncer.start()\nregister _crypto-p2p._tcp.local.\nTXT: user_id, user_tag, wallet…",
       "lineHeight": 1.25,
-      "baseline": 50
+      "baseline": 50,
+      "versionNonce": 529407548,
+      "index": "a4",
+      "isDeleted": false,
+      "autoResize": true
     },
     {
       "type": "rectangle",
-      "version": 1,
+      "version": 2,
       "id": "alice-listener",
       "fillStyle": "solid",
       "strokeWidth": 2,
@@ -182,13 +200,16 @@
         "type": 3
       },
       "boundElements": [],
-      "updated": 1,
+      "updated": 1780293673696,
       "link": null,
-      "locked": false
+      "locked": false,
+      "versionNonce": 2123821956,
+      "index": "a5",
+      "isDeleted": false
     },
     {
       "type": "text",
-      "version": 1,
+      "version": 2,
       "id": "alice-listener-t",
       "fillStyle": "solid",
       "strokeWidth": 2,
@@ -207,7 +228,7 @@
       "frameId": null,
       "roundness": null,
       "boundElements": [],
-      "updated": 1,
+      "updated": 1780293673696,
       "link": null,
       "locked": false,
       "fontSize": 14,
@@ -218,11 +239,15 @@
       "containerId": null,
       "originalText": "MdnsListener.browse()\nparse_service_info() → DiscoveredPeer\nself-filter + 30s timeout",
       "lineHeight": 1.25,
-      "baseline": 50
+      "baseline": 50,
+      "versionNonce": 287766204,
+      "index": "a6",
+      "isDeleted": false,
+      "autoResize": true
     },
     {
       "type": "rectangle",
-      "version": 1,
+      "version": 2,
       "id": "bob-box",
       "fillStyle": "solid",
       "strokeWidth": 2,
@@ -243,13 +268,16 @@
         "type": 3
       },
       "boundElements": [],
-      "updated": 1,
+      "updated": 1780293673696,
       "link": null,
-      "locked": false
+      "locked": false,
+      "versionNonce": 838198020,
+      "index": "a7",
+      "isDeleted": false
     },
     {
       "type": "text",
-      "version": 1,
+      "version": 2,
       "id": "bob-title",
       "fillStyle": "solid",
       "strokeWidth": 2,
@@ -268,7 +296,7 @@
       "frameId": null,
       "roundness": null,
       "boundElements": [],
-      "updated": 1,
+      "updated": 1780293673696,
       "link": null,
       "locked": false,
       "fontSize": 20,
@@ -279,11 +307,15 @@
       "containerId": null,
       "originalText": "Node B — Bob (:3001)",
       "lineHeight": 1.25,
-      "baseline": 18
+      "baseline": 18,
+      "versionNonce": 2064695100,
+      "index": "a8",
+      "isDeleted": false,
+      "autoResize": true
     },
     {
       "type": "rectangle",
-      "version": 1,
+      "version": 3,
       "id": "bob-announcer",
       "fillStyle": "solid",
       "strokeWidth": 2,
@@ -303,14 +335,22 @@
       "roundness": {
         "type": 3
       },
-      "boundElements": [],
-      "updated": 1,
+      "boundElements": [
+        {
+          "id": "arrow-b-announce",
+          "type": "arrow"
+        }
+      ],
+      "updated": 1780293711781,
       "link": null,
-      "locked": false
+      "locked": false,
+      "versionNonce": 464676228,
+      "index": "a9",
+      "isDeleted": false
     },
     {
       "type": "text",
-      "version": 1,
+      "version": 2,
       "id": "bob-announcer-t",
       "fillStyle": "solid",
       "strokeWidth": 2,
@@ -329,7 +369,7 @@
       "frameId": null,
       "roundness": null,
       "boundElements": [],
-      "updated": 1,
+      "updated": 1780293673696,
       "link": null,
       "locked": false,
       "fontSize": 14,
@@ -340,11 +380,15 @@
       "containerId": null,
       "originalText": "MdnsAnnouncer.start()\nregister _crypto-p2p._tcp.local.\nTXT: user_id, user_tag, wallet…",
       "lineHeight": 1.25,
-      "baseline": 50
+      "baseline": 50,
+      "versionNonce": 95254460,
+      "index": "aA",
+      "isDeleted": false,
+      "autoResize": true
     },
     {
       "type": "rectangle",
-      "version": 1,
+      "version": 6,
       "id": "bob-listener",
       "fillStyle": "solid",
       "strokeWidth": 2,
@@ -364,14 +408,22 @@
       "roundness": {
         "type": 3
       },
-      "boundElements": [],
-      "updated": 1,
+      "boundElements": [
+        {
+          "id": "arrow-lan-b",
+          "type": "arrow"
+        }
+      ],
+      "updated": 1780293710712,
       "link": null,
-      "locked": false
+      "locked": false,
+      "versionNonce": 1278552892,
+      "index": "aB",
+      "isDeleted": false
     },
     {
       "type": "text",
-      "version": 1,
+      "version": 2,
       "id": "bob-listener-t",
       "fillStyle": "solid",
       "strokeWidth": 2,
@@ -390,7 +442,7 @@
       "frameId": null,
       "roundness": null,
       "boundElements": [],
-      "updated": 1,
+      "updated": 1780293673696,
       "link": null,
       "locked": false,
       "fontSize": 14,
@@ -401,11 +453,15 @@
       "containerId": null,
       "originalText": "MdnsListener.browse()\nparse_service_info() → DiscoveredPeer\nself-filter + 30s timeout",
       "lineHeight": 1.25,
-      "baseline": 50
+      "baseline": 50,
+      "versionNonce": 2099191868,
+      "index": "aC",
+      "isDeleted": false,
+      "autoResize": true
     },
     {
       "type": "ellipse",
-      "version": 1,
+      "version": 11,
       "id": "lan",
       "fillStyle": "hachure",
       "strokeWidth": 2,
@@ -423,14 +479,26 @@
       "groupIds": [],
       "frameId": null,
       "roundness": null,
-      "boundElements": [],
-      "updated": 1,
+      "boundElements": [
+        {
+          "id": "arrow-lan-b",
+          "type": "arrow"
+        },
+        {
+          "id": "arrow-b-announce",
+          "type": "arrow"
+        }
+      ],
+      "updated": 1780293711781,
       "link": null,
-      "locked": false
+      "locked": false,
+      "versionNonce": 2066982076,
+      "index": "aD",
+      "isDeleted": false
     },
     {
       "type": "text",
-      "version": 1,
+      "version": 4,
       "id": "lan-t",
       "fillStyle": "solid",
       "strokeWidth": 2,
@@ -449,7 +517,7 @@
       "frameId": null,
       "roundness": null,
       "boundElements": [],
-      "updated": 1,
+      "updated": 1780293711780,
       "link": null,
       "locked": false,
       "fontSize": 16,
@@ -460,11 +528,15 @@
       "containerId": null,
       "originalText": "Wi-Fi / hotspot\nor Bluetooth\n(broadcast)",
       "lineHeight": 1.25,
-      "baseline": 30
+      "baseline": 30,
+      "versionNonce": 1381090820,
+      "index": "aE",
+      "isDeleted": false,
+      "autoResize": true
     },
     {
       "type": "arrow",
-      "version": 1,
+      "version": 2,
       "id": "arrow-a-announce",
       "fillStyle": "solid",
       "strokeWidth": 2,
@@ -485,18 +557,24 @@
         "type": 2
       },
       "boundElements": [],
-      "updated": 1,
+      "updated": 1780293673696,
       "link": null,
       "locked": false,
       "startBinding": {
+        "mode": "orbit",
         "elementId": "alice-announcer",
-        "focus": 0,
-        "gap": 5
+        "fixedPoint": [
+          1,
+          0.5001
+        ]
       },
       "endBinding": {
+        "mode": "inside",
         "elementId": "lan",
-        "focus": 0,
-        "gap": 5
+        "fixedPoint": [
+          0.475,
+          0.3076923076923077
+        ]
       },
       "lastCommittedPoint": null,
       "startArrowhead": null,
@@ -510,11 +588,14 @@
           110,
           18
         ]
-      ]
+      ],
+      "versionNonce": 179978500,
+      "index": "aF",
+      "isDeleted": false
     },
     {
       "type": "arrow",
-      "version": 1,
+      "version": 123,
       "id": "arrow-lan-b",
       "fillStyle": "solid",
       "strokeWidth": 2,
@@ -522,12 +603,12 @@
       "roughness": 0,
       "opacity": 100,
       "angle": 0,
-      "x": 600,
-      "y": 240,
+      "x": 598.9555887826982,
+      "y": 255.65510360337964,
       "strokeColor": "#1971c2",
       "backgroundColor": "transparent",
-      "width": 18,
-      "height": 0,
+      "width": 16.011759096740775,
+      "height": 39.73876061632217,
       "seed": 1017,
       "groupIds": [],
       "frameId": null,
@@ -535,18 +616,24 @@
         "type": 2
       },
       "boundElements": [],
-      "updated": 1,
+      "updated": 1780293710712,
       "link": null,
       "locked": false,
       "startBinding": {
         "elementId": "lan",
-        "focus": 0,
-        "gap": 5
+        "mode": "inside",
+        "fixedPoint": [
+          0.9947779439134911,
+          0.4281161815644588
+        ]
       },
       "endBinding": {
         "elementId": "bob-listener",
-        "focus": 0,
-        "gap": 5
+        "mode": "orbit",
+        "fixedPoint": [
+          0.06768366036076624,
+          0.9323163396392343
+        ]
       },
       "lastCommittedPoint": null,
       "startArrowhead": null,
@@ -557,14 +644,18 @@
           0
         ],
         [
-          18,
-          60
+          16.011759096740775,
+          39.73876061632217
         ]
-      ]
+      ],
+      "versionNonce": 1956481596,
+      "index": "aG",
+      "isDeleted": false,
+      "moveMidPointsWithElement": false
     },
     {
       "type": "arrow",
-      "version": 1,
+      "version": 27,
       "id": "arrow-b-announce",
       "fillStyle": "solid",
       "strokeWidth": 2,
@@ -572,12 +663,12 @@
       "roughness": 0,
       "opacity": 100,
       "angle": 0,
-      "x": 600,
-      "y": 222,
+      "x": 614,
+      "y": 207.95744064381694,
       "strokeColor": "#2f9e44",
       "backgroundColor": "transparent",
-      "width": 110,
-      "height": 18,
+      "width": 124,
+      "height": 32.04255935618306,
       "seed": 1018,
       "groupIds": [],
       "frameId": null,
@@ -585,18 +676,24 @@
         "type": 2
       },
       "boundElements": [],
-      "updated": 1,
+      "updated": 1780293711781,
       "link": null,
       "locked": false,
       "startBinding": {
+        "mode": "orbit",
         "elementId": "bob-announcer",
-        "focus": 0,
-        "gap": 5
+        "fixedPoint": [
+          0.14527579886336234,
+          0.14527579886336184
+        ]
       },
       "endBinding": {
+        "mode": "inside",
         "elementId": "lan",
-        "focus": 0,
-        "gap": 5
+        "fixedPoint": [
+          0.45,
+          0.3076923076923077
+        ]
       },
       "lastCommittedPoint": null,
       "startArrowhead": null,
@@ -607,14 +704,18 @@
           0
         ],
         [
-          -110,
-          18
+          -124,
+          32.04255935618306
         ]
-      ]
+      ],
+      "versionNonce": 458730812,
+      "index": "aH",
+      "isDeleted": false,
+      "moveMidPointsWithElement": false
     },
     {
       "type": "arrow",
-      "version": 1,
+      "version": 2,
       "id": "arrow-lan-a",
       "fillStyle": "solid",
       "strokeWidth": 2,
@@ -635,18 +736,24 @@
         "type": 2
       },
       "boundElements": [],
-      "updated": 1,
+      "updated": 1780293673696,
       "link": null,
       "locked": false,
       "startBinding": {
+        "mode": "orbit",
         "elementId": "lan",
-        "focus": 0,
-        "gap": 5
+        "fixedPoint": [
+          0,
+          0.3076923076923077
+        ]
       },
       "endBinding": {
+        "mode": "orbit",
         "elementId": "alice-listener",
-        "focus": 0,
-        "gap": 5
+        "fixedPoint": [
+          0.6240198070984923,
+          0.6240198070984919
+        ]
       },
       "lastCommittedPoint": null,
       "startArrowhead": null,
@@ -660,11 +767,14 @@
           -18,
           60
         ]
-      ]
+      ],
+      "versionNonce": 705018300,
+      "index": "aI",
+      "isDeleted": false
     },
     {
       "type": "text",
-      "version": 1,
+      "version": 3,
       "id": "footer",
       "fillStyle": "solid",
       "strokeWidth": 2,
@@ -672,8 +782,8 @@
       "roughness": 0,
       "opacity": 100,
       "angle": 0,
-      "x": 80,
-      "y": 410,
+      "x": 79.84989672894949,
+      "y": 410.14541254383016,
       "strokeColor": "#495057",
       "backgroundColor": "transparent",
       "width": 840,
@@ -683,7 +793,7 @@
       "frameId": null,
       "roundness": null,
       "boundElements": [],
-      "updated": 1,
+      "updated": 1780293715458,
       "link": null,
       "locked": false,
       "fontSize": 15,
@@ -694,12 +804,19 @@
       "containerId": null,
       "originalText": "Each node announces AND listens over the chosen transport - Wi-Fi/hotspot (mDNS) on a shared network, or Bluetooth (BLE) with no network at all.\nNo server, no pairing. One node alone -> empty list; a second node -> both discover each other. Resolved peers share one DiscoveredPeer shape regardless of transport.\nSource: crates/proximity/src/mdns.rs (Wi-Fi) - crates/proximity/src/ble.rs (Bluetooth) - crates/proximity/src/discovery.rs",
       "lineHeight": 1.25,
-      "baseline": 45
+      "baseline": 45,
+      "versionNonce": 585204612,
+      "index": "aJ",
+      "isDeleted": false,
+      "autoResize": true
     }
   ],
   "appState": {
-    "gridSize": null,
-    "viewBackgroundColor": "#ffffff"
+    "gridSize": 20,
+    "gridStep": 5,
+    "gridModeEnabled": false,
+    "viewBackgroundColor": "#ffffff",
+    "lockedMultiSelections": {}
   },
   "files": {}
 }

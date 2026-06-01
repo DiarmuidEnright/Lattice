@@ -5,7 +5,7 @@
   "elements": [
     {
       "type": "text",
-      "version": 155,
+      "version": 24,
       "id": "title",
       "fillStyle": "solid",
       "strokeWidth": 2,
@@ -13,8 +13,8 @@
       "roughness": 0,
       "opacity": 100,
       "angle": 0,
-      "x": -82.20276331060825,
-      "y": 20.218474570512598,
+      "x": 69.98046875,
+      "y": 22.84765625,
       "strokeColor": "#1e1e1e",
       "backgroundColor": "transparent",
       "width": 695.9957885742188,
@@ -24,7 +24,7 @@
       "frameId": null,
       "roundness": null,
       "boundElements": [],
-      "updated": 1780247288131,
+      "updated": 1780293815834,
       "link": null,
       "locked": false,
       "fontSize": 28,
@@ -36,7 +36,7 @@
       "originalText": "Proximity Transfer — Create → Accept → Settle",
       "lineHeight": 1.25,
       "baseline": 25,
-      "versionNonce": 1939143813,
+      "versionNonce": 257230396,
       "index": "a0",
       "isDeleted": false,
       "autoResize": true
@@ -73,10 +73,10 @@
           "type": "arrow"
         }
       ],
-      "updated": 1780247220202,
+      "updated": 1780293798872,
       "link": null,
       "locked": false,
-      "versionNonce": 1795331077,
+      "versionNonce": 1156266116,
       "index": "a1",
       "isDeleted": false
     },
@@ -101,7 +101,7 @@
       "frameId": null,
       "roundness": null,
       "boundElements": [],
-      "updated": 1780247220202,
+      "updated": 1780293798872,
       "link": null,
       "locked": false,
       "fontSize": 15,
@@ -113,7 +113,7 @@
       "originalText": "1. Alice: POST /api/proximity/transfers\ncreate_transfer_request() → status = Pending\npersist pending row to PostgreSQL",
       "lineHeight": 1.25,
       "baseline": 45,
-      "versionNonce": 723802827,
+      "versionNonce": 1021673916,
       "index": "a2",
       "isDeleted": false,
       "autoResize": true
@@ -154,10 +154,10 @@
           "type": "arrow"
         }
       ],
-      "updated": 1780247220202,
+      "updated": 1780293798872,
       "link": null,
       "locked": false,
-      "versionNonce": 1274792805,
+      "versionNonce": 259622916,
       "index": "a3",
       "isDeleted": false
     },
@@ -182,7 +182,7 @@
       "frameId": null,
       "roundness": null,
       "boundElements": [],
-      "updated": 1780247220202,
+      "updated": 1780293798872,
       "link": null,
       "locked": false,
       "fontSize": 15,
@@ -194,7 +194,7 @@
       "originalText": "2. validate_sender_balance()\nchecks custodial signer's REAL on-chain SOL\n(amount + ~1% fee headroom)",
       "lineHeight": 1.25,
       "baseline": 45,
-      "versionNonce": 1527040363,
+      "versionNonce": 1690692156,
       "index": "a4",
       "isDeleted": false,
       "autoResize": true
@@ -235,10 +235,10 @@
           "type": "arrow"
         }
       ],
-      "updated": 1780247220202,
+      "updated": 1780293798872,
       "link": null,
       "locked": false,
-      "versionNonce": 1536628421,
+      "versionNonce": 579987332,
       "index": "a5",
       "isDeleted": false
     },
@@ -263,7 +263,7 @@
       "frameId": null,
       "roundness": null,
       "boundElements": [],
-      "updated": 1780247220202,
+      "updated": 1780293798872,
       "link": null,
       "locked": false,
       "fontSize": 15,
@@ -275,7 +275,7 @@
       "originalText": "3. Bob: POST /transfers/:id/accept\nensure_request_loaded() (load from DB)\naccept_transfer() → status = Accepted",
       "lineHeight": 1.25,
       "baseline": 45,
-      "versionNonce": 505308171,
+      "versionNonce": 1971667644,
       "index": "a6",
       "isDeleted": false,
       "autoResize": true
@@ -318,10 +318,10 @@
           "type": "arrow"
         }
       ],
-      "updated": 1780247220202,
+      "updated": 1780293798872,
       "link": null,
       "locked": false,
-      "versionNonce": 611448357,
+      "versionNonce": 41047812,
       "index": "a7",
       "isDeleted": false
     },
@@ -346,7 +346,7 @@
       "frameId": null,
       "roundness": null,
       "boundElements": [],
-      "updated": 1780247220202,
+      "updated": 1780293798872,
       "link": null,
       "locked": false,
       "fontSize": 15,
@@ -358,14 +358,14 @@
       "originalText": "execute_or_queue\nis_blockchain_online()?",
       "lineHeight": 1.25,
       "baseline": 35,
-      "versionNonce": 208382635,
+      "versionNonce": 1439009596,
       "index": "a8",
       "isDeleted": false,
       "autoResize": true
     },
     {
       "type": "rectangle",
-      "version": 874,
+      "version": 2,
       "id": "online",
       "fillStyle": "solid",
       "strokeWidth": 2,
@@ -373,8 +373,8 @@
       "roughness": 0,
       "opacity": 100,
       "angle": 0,
-      "x": 530.77734375,
-      "y": 488.83984375,
+      "x": 560,
+      "y": 360,
       "strokeColor": "#2f9e44",
       "backgroundColor": "#d3f9d8",
       "width": 380,
@@ -395,16 +395,16 @@
           "type": "arrow"
         }
       ],
-      "updated": 1780247270926,
+      "updated": 1780293798872,
       "link": null,
       "locked": false,
-      "versionNonce": 777421573,
+      "versionNonce": 2073613956,
       "index": "a9",
       "isDeleted": false
     },
     {
       "type": "text",
-      "version": 6648,
+      "version": 2,
       "id": "online-t",
       "fillStyle": "solid",
       "strokeWidth": 2,
@@ -412,12 +412,12 @@
       "roughness": 0,
       "opacity": 100,
       "angle": 0,
-      "x": 545.77734375,
-      "y": 508.83984375,
+      "x": 570,
+      "y": 375,
       "strokeColor": "#1e1e1e",
       "backgroundColor": "transparent",
-      "width": 344.8046875,
-      "height": 75,
+      "width": 360,
+      "height": 60,
       "seed": 2011,
       "groupIds": [],
       "frameId": null,
@@ -428,7 +428,7 @@
           "id": "online-t"
         }
       ],
-      "updated": 1780247275192,
+      "updated": 1780293798872,
       "link": null,
       "locked": false,
       "fontSize": 15,
@@ -440,14 +440,14 @@
       "originalText": "ONLINE → execute_transfer()\nexecute_sol_transfer() signs with custodial\nkeypair on blocking thread → submit to Solana\nstatus = Completed + real tx hash",
       "lineHeight": 1.25,
       "baseline": 55,
-      "versionNonce": 1393755621,
+      "versionNonce": 1206436796,
       "index": "aA",
       "isDeleted": false,
       "autoResize": true
     },
     {
       "type": "rectangle",
-      "version": 1064,
+      "version": 2,
       "id": "offline",
       "fillStyle": "solid",
       "strokeWidth": 2,
@@ -455,8 +455,8 @@
       "roughness": 0,
       "opacity": 100,
       "angle": 0,
-      "x": -319.55859375,
-      "y": 459.04296875,
+      "x": 560,
+      "y": 500,
       "strokeColor": "#e8590c",
       "backgroundColor": "#ffe8cc",
       "width": 380,
@@ -481,16 +481,16 @@
           "type": "arrow"
         }
       ],
-      "updated": 1780247260562,
+      "updated": 1780293798872,
       "link": null,
       "locked": false,
-      "versionNonce": 742833259,
+      "versionNonce": 449013252,
       "index": "aB",
       "isDeleted": false
     },
     {
       "type": "text",
-      "version": 1064,
+      "version": 2,
       "id": "offline-t",
       "fillStyle": "solid",
       "strokeWidth": 2,
@@ -498,8 +498,8 @@
       "roughness": 0,
       "opacity": 100,
       "angle": 0,
-      "x": -309.55859375,
-      "y": 474.04296875,
+      "x": 570,
+      "y": 515,
       "strokeColor": "#1e1e1e",
       "backgroundColor": "transparent",
       "width": 360,
@@ -514,7 +514,7 @@
           "id": "offline-t"
         }
       ],
-      "updated": 1780247260562,
+      "updated": 1780293798872,
       "link": null,
       "locked": false,
       "fontSize": 15,
@@ -526,14 +526,14 @@
       "originalText": "OFFLINE → persist row\nstatus = PendingSettlement (no tx hash)\nreturns Ok(None) — does NOT fail",
       "lineHeight": 1.25,
       "baseline": 55,
-      "versionNonce": 2024404747,
+      "versionNonce": 1913711676,
       "index": "aC",
       "isDeleted": false,
       "autoResize": true
     },
     {
       "type": "rectangle",
-      "version": 1037,
+      "version": 2,
       "id": "sync",
       "fillStyle": "solid",
       "strokeWidth": 2,
@@ -541,8 +541,8 @@
       "roughness": 0,
       "opacity": 100,
       "angle": 0,
-      "x": -324.48046875,
-      "y": 652.0234375,
+      "x": 560,
+      "y": 640,
       "strokeColor": "#1971c2",
       "backgroundColor": "#a5d8ff",
       "width": 380,
@@ -563,16 +563,16 @@
           "type": "arrow"
         }
       ],
-      "updated": 1780247265952,
+      "updated": 1780293798872,
       "link": null,
       "locked": false,
-      "versionNonce": 1937822309,
+      "versionNonce": 619709828,
       "index": "aD",
       "isDeleted": false
     },
     {
       "type": "text",
-      "version": 1037,
+      "version": 2,
       "id": "sync-t",
       "fillStyle": "solid",
       "strokeWidth": 2,
@@ -580,8 +580,8 @@
       "roughness": 0,
       "opacity": 100,
       "angle": 0,
-      "x": -314.48046875,
-      "y": 667.0234375,
+      "x": 570,
+      "y": 655,
       "strokeColor": "#1e1e1e",
       "backgroundColor": "transparent",
       "width": 360,
@@ -596,7 +596,7 @@
           "id": "sync-t"
         }
       ],
-      "updated": 1780247265952,
+      "updated": 1780293798872,
       "link": null,
       "locked": false,
       "fontSize": 15,
@@ -608,7 +608,7 @@
       "originalText": "Background: start_settlement_sync_task()\nsync_pending_settlements() when online\nUPDATE → Completed + tx hash (idempotent)",
       "lineHeight": 1.25,
       "baseline": 55,
-      "versionNonce": 2061712837,
+      "versionNonce": 1713374396,
       "index": "aE",
       "isDeleted": false,
       "autoResize": true
@@ -636,7 +636,7 @@
         "type": 2
       },
       "boundElements": [],
-      "updated": 1780247220202,
+      "updated": 1780293798872,
       "link": null,
       "locked": false,
       "startBinding": {
@@ -668,7 +668,7 @@
           40
         ]
       ],
-      "versionNonce": 1100430245,
+      "versionNonce": 257733892,
       "index": "aF",
       "isDeleted": false
     },
@@ -695,7 +695,7 @@
         "type": 2
       },
       "boundElements": [],
-      "updated": 1780247220202,
+      "updated": 1780293798872,
       "link": null,
       "locked": false,
       "startBinding": {
@@ -727,7 +727,7 @@
           40
         ]
       ],
-      "versionNonce": 860323115,
+      "versionNonce": 699927868,
       "index": "aG",
       "isDeleted": false
     },
@@ -754,7 +754,7 @@
         "type": 2
       },
       "boundElements": [],
-      "updated": 1780247220202,
+      "updated": 1780293798872,
       "link": null,
       "locked": false,
       "startBinding": {
@@ -786,13 +786,13 @@
           40
         ]
       ],
-      "versionNonce": 618299141,
+      "versionNonce": 2005365892,
       "index": "aH",
       "isDeleted": false
     },
     {
       "type": "arrow",
-      "version": 874,
+      "version": 2,
       "id": "a4",
       "fillStyle": "solid",
       "strokeWidth": 2,
@@ -800,12 +800,12 @@
       "roughness": 0,
       "opacity": 100,
       "angle": 0,
-      "x": 424.8626421881936,
-      "y": 507.9574351341638,
+      "x": 420,
+      "y": 480,
       "strokeColor": "#2f9e44",
       "backgroundColor": "transparent",
-      "width": 100.13606898686214,
-      "height": 1.175618327573261,
+      "width": 140,
+      "height": 75,
       "seed": 2019,
       "groupIds": [],
       "frameId": null,
@@ -813,7 +813,7 @@
         "type": 2
       },
       "boundElements": [],
-      "updated": 1780247270926,
+      "updated": 1780293798872,
       "link": null,
       "locked": false,
       "startBinding": {
@@ -841,18 +841,17 @@
           0
         ],
         [
-          100.13606898686214,
-          -1.175618327573261
+          140,
+          -75
         ]
       ],
-      "versionNonce": 2147173829,
+      "versionNonce": 1044055484,
       "index": "aI",
-      "isDeleted": false,
-      "moveMidPointsWithElement": false
+      "isDeleted": false
     },
     {
       "type": "text",
-      "version": 72,
+      "version": 2,
       "id": "a4-label",
       "fillStyle": "solid",
       "strokeWidth": 2,
@@ -860,8 +859,8 @@
       "roughness": 0,
       "opacity": 100,
       "angle": 0,
-      "x": 440.85676354410725,
-      "y": 472.5176350901654,
+      "x": 458,
+      "y": 412,
       "strokeColor": "#2f9e44",
       "backgroundColor": "transparent",
       "width": 50,
@@ -871,7 +870,7 @@
       "frameId": null,
       "roundness": null,
       "boundElements": [],
-      "updated": 1780247291581,
+      "updated": 1780293798872,
       "link": null,
       "locked": false,
       "fontSize": 14,
@@ -883,14 +882,14 @@
       "originalText": "yes",
       "lineHeight": 1.25,
       "baseline": 14,
-      "versionNonce": 1233895301,
+      "versionNonce": 456016900,
       "index": "aJ",
       "isDeleted": false,
       "autoResize": true
     },
     {
       "type": "arrow",
-      "version": 1064,
+      "version": 2,
       "id": "a5",
       "fillStyle": "solid",
       "strokeWidth": 2,
@@ -898,12 +897,12 @@
       "roughness": 0,
       "opacity": 100,
       "angle": 0,
-      "x": 155.6737611350316,
-      "y": 514.8305142529027,
+      "x": 420,
+      "y": 525,
       "strokeColor": "#e8590c",
       "backgroundColor": "transparent",
-      "width": 89.23235488503161,
-      "height": 1.3026720073195293,
+      "width": 140,
+      "height": 20,
       "seed": 2021,
       "groupIds": [],
       "frameId": null,
@@ -911,7 +910,7 @@
         "type": 2
       },
       "boundElements": [],
-      "updated": 1780247260562,
+      "updated": 1780293798872,
       "link": null,
       "locked": false,
       "startBinding": {
@@ -939,18 +938,17 @@
           0
         ],
         [
-          -89.23235488503161,
-          1.3026720073195293
+          140,
+          20
         ]
       ],
-      "versionNonce": 1443683755,
+      "versionNonce": 684387900,
       "index": "aK",
-      "isDeleted": false,
-      "moveMidPointsWithElement": false
+      "isDeleted": false
     },
     {
       "type": "text",
-      "version": 97,
+      "version": 2,
       "id": "a5-label",
       "fillStyle": "solid",
       "strokeWidth": 2,
@@ -958,8 +956,8 @@
       "roughness": 0,
       "opacity": 100,
       "angle": 0,
-      "x": 100.72435196373033,
-      "y": 475.1234503099088,
+      "x": 458,
+      "y": 540,
       "strokeColor": "#e8590c",
       "backgroundColor": "transparent",
       "width": 50,
@@ -969,7 +967,7 @@
       "frameId": null,
       "roundness": null,
       "boundElements": [],
-      "updated": 1780247295023,
+      "updated": 1780293798872,
       "link": null,
       "locked": false,
       "fontSize": 14,
@@ -981,14 +979,14 @@
       "originalText": "no",
       "lineHeight": 1.25,
       "baseline": 14,
-      "versionNonce": 2107171659,
+      "versionNonce": 1347363716,
       "index": "aL",
       "isDeleted": false,
       "autoResize": true
     },
     {
       "type": "arrow",
-      "version": 1228,
+      "version": 2,
       "id": "a6",
       "fillStyle": "solid",
       "strokeWidth": 2,
@@ -996,12 +994,12 @@
       "roughness": 0,
       "opacity": 100,
       "angle": 0,
-      "x": -130.82109493413864,
-      "y": 555.04296875,
+      "x": 750,
+      "y": 590,
       "strokeColor": "#1971c2",
       "backgroundColor": "transparent",
-      "width": 2.3204135502904535,
-      "height": 90.98046875,
+      "width": 0,
+      "height": 50,
       "seed": 2023,
       "groupIds": [],
       "frameId": null,
@@ -1009,7 +1007,7 @@
         "type": 2
       },
       "boundElements": [],
-      "updated": 1780247265953,
+      "updated": 1780293798872,
       "link": null,
       "locked": false,
       "startBinding": {
@@ -1037,18 +1035,17 @@
           0
         ],
         [
-          -2.3204135502904535,
-          90.98046875
+          0,
+          50
         ]
       ],
-      "versionNonce": 1973501221,
+      "versionNonce": 2051655356,
       "index": "aM",
-      "isDeleted": false,
-      "moveMidPointsWithElement": false
+      "isDeleted": false
     },
     {
       "type": "text",
-      "version": 981,
+      "version": 2,
       "id": "a6-label",
       "fillStyle": "solid",
       "strokeWidth": 2,
@@ -1056,8 +1053,8 @@
       "roughness": 0,
       "opacity": 100,
       "angle": 0,
-      "x": -112.18830221020255,
-      "y": 589.246100842434,
+      "x": 760,
+      "y": 600,
       "strokeColor": "#1971c2",
       "backgroundColor": "transparent",
       "width": 170,
@@ -1067,7 +1064,7 @@
       "frameId": null,
       "roundness": null,
       "boundElements": [],
-      "updated": 1780247282301,
+      "updated": 1780293798872,
       "link": null,
       "locked": false,
       "fontSize": 13,
@@ -1079,14 +1076,14 @@
       "originalText": "when connectivity returns",
       "lineHeight": 1.25,
       "baseline": 13,
-      "versionNonce": 354954155,
+      "versionNonce": 2099778308,
       "index": "aN",
       "isDeleted": false,
       "autoResize": true
     },
     {
       "type": "text",
-      "version": 257,
+      "version": 2,
       "id": "footer",
       "fillStyle": "solid",
       "strokeWidth": 2,
@@ -1094,8 +1091,8 @@
       "roughness": 0,
       "opacity": 100,
       "angle": 0,
-      "x": 93.25567299027898,
-      "y": 604.1920222962228,
+      "x": 100,
+      "y": 760,
       "strokeColor": "#495057",
       "backgroundColor": "transparent",
       "width": 840,
@@ -1105,7 +1102,7 @@
       "frameId": null,
       "roundness": null,
       "boundElements": [],
-      "updated": 1780247298586,
+      "updated": 1780293798872,
       "link": null,
       "locked": false,
       "fontSize": 14,
@@ -1117,7 +1114,7 @@
       "originalText": "Source: crates/proximity/src/transfer.rs (create_transfer_request, accept_transfer, execute_or_queue_transfer,\nexecute_sol_transfer, sync_pending_settlements) · handler: crates/api/src/proximity/proximity_handlers.rs",
       "lineHeight": 1.25,
       "baseline": 35,
-      "versionNonce": 40030283,
+      "versionNonce": 1465487164,
       "index": "aO",
       "isDeleted": false,
       "autoResize": true
